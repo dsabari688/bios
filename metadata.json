@@ -1,0 +1,6 @@
+{
+  "name": "LifeOS Dashboard",
+  "description": "An immersive, cyberpunk-inspired cognitive command center that tracks your tasks, habits, budgets, and focus with a built-in J.A.R.V.I.S. and Piggy-personality assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
