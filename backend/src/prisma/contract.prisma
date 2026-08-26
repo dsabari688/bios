@@ -1,0 +1,50 @@
+﻿// use prisma-next
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  username  String?
+  name      String?
+  posts     Post[]
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String?
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  Int
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+}
+
+model Task {
+  id               String            @id @default(uuid())
+  title            String
+  description      String?
+  date             TimestamptzString
+  endTime          TimestamptzString?
+  status           String            @default("pending")
+  category         String            @default("important-not-urgent")
+  rescheduledCount Int               @default(0)
+  createdAt        TimestamptzString @default(now())
+  updatedAt        temporal.updatedAtString()
+
+  @@index([date])
+  @@index([status])
+}
+
+model Mood {
+  id        String            @id @default(uuid())
+  mood      String
+  score     Int
+  note      String?
+  loggedAt  TimestamptzString @default(now())
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+
+  @@index([loggedAt])
+  @@map("mood")
+}

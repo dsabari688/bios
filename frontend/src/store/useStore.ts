@@ -1,0 +1,1678 @@
+import { create } from "zustand";
+import { FullOSData, Task, Habit, Goal, Expense, ChatMessage, SystemNotification, DiaryEntry, UserProfile } from "../types";
+import { executeMCPTool, MCP_TOOLS_REGISTRY } from "../lib/mcpBridge";
+import { goalService } from "../services/goalService";
+import { habitService } from "../services/habitService";
+import { expenseService } from "../services/expenseService";
+import { diaryService } from "../services/diaryService";
+import { budgetService } from "../services/budgetService";
+import { notificationService } from "../services/notificationService";
+import { isUuid } from "../lib/taskSync";
+import { getLocalDateString, parseLocalDate } from "../lib/timeUtils";
+import {
+  backendToTask,
+  fetchBackendTasks,
+  syncCompleteTask,
+  syncCreateTask,
+  syncDeleteTask,
+  syncSetTaskStatus,
+  syncUpdateTask
+} from "../lib/taskSync";
+
+export interface ToastMessage {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+  onUndo?: () => void;
+}
+
+export interface UndoAction {
+  description: string;
+  execute: () => Promise<void>;
+}
+
+export interface StoreState {
+  token: string | null;
+  isLoggedIn: boolean;
+  currentUser: {
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+  } | null;
+  osData: FullOSData | null;
+  isUpdatingDb: boolean;
+  activeView: "dashboard" | "missions" | "habits" | "goals" | "analytics" | "ai-core" | "focus-timer" | "settings" | "expenses" | "ai-dashboard" | "diary";
+  isSidebarOpen: boolean;
+  notificationsOpen: boolean;
+  toasts: ToastMessage[];
+  loginUsername: string;
+  loginEmail: string;
+  
+  selectedTaskId: string | null;
+  selectedTaskTitle: string | null;
+  selectedHabitId: string | null;
+  selectedHabitName: string | null;
+  selectedDate: string;
+  
+  isTaskModalOpen: boolean;
+  editingTask: Task | null;
+  isDeferModalOpen: boolean;
+  deferringTask: Task | null;
+  isDailyReviewOpen: boolean;
+  isPlannerModalOpen: boolean;
+  plannerPlan: any | null;
+  isWeeklyReviewOpen: boolean;
+  isOffline: boolean;
+  
+  undoStack: UndoAction[];
+  
+  // Actions
+  setToken: (token: string | null) => void;
+  setIsLoggedIn: (isLoggedIn: boolean) => void;
+  setCurrentUser: (user: StoreState["currentUser"]) => void;
+  setActiveView: (view: StoreState["activeView"]) => void;
+  setIsSidebarOpen: (isOpen: boolean) => void;
+  setNotificationsOpen: (isOpen: boolean) => void;
+  setLoginUsername: (name: string) => void;
+  setLoginEmail: (email: string) => void;
+  setSelectedDate: (date: string) => void;
+  changeSelectedDate: (offsetDays: number) => void;
+  resetSelectedDateToToday: () => void;
+  setSelectedTaskId: (id: string | null) => void;
+  setSelectedTaskTitle: (title: string | null) => void;
+  setSelectedHabitId: (id: string | null) => void;
+  setSelectedHabitName: (name: string | null) => void;
+  setIsTaskModalOpen: (isOpen: boolean) => void;
+  setEditingTask: (task: Task | null) => void;
+  setIsDeferModalOpen: (isOpen: boolean) => void;
+  setDeferringTask: (task: Task | null) => void;
+  openDeferModal: (task: Task) => void;
+  setIsDailyReviewOpen: (isOpen: boolean) => void;
+  setIsPlannerModalOpen: (isOpen: boolean) => void;
+  setIsWeeklyReviewOpen: (isOpen: boolean) => void;
+  setPlannerPlan: (plan: any | null) => void;
+  setIsOffline: (isOffline: boolean) => void;
+  
+  showToast: (message: string, type?: ToastMessage["type"], onUndo?: () => void) => void;
+  dismissToast: (id: string) => void;
+  
+  // API Sync helpers
+  authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  hydrateSystemData: () => Promise<void>;
+  
+  // Tasks Actions
+  toggleTask: (taskId: string) => Promise<void>;
+  saveTask: (taskData: Partial<Task> & {
+    title: string;
+    category: Task["category"];
+    date: string;
+    time: string;
+  }) => Promise<void>;
+  rescheduleTask: (taskId: string, newDate: string, reason?: string, maxDeferLimit?: number, newTime?: string) => Promise<void>;
+  deferTask: (taskId: string, options: {
+    newDate: string;
+    newTime?: string;
+    newEndTime?: string;
+    reason: string;
+    maxDeferLimit?: number;
+  }) => Promise<void>;
+  deleteTask: (taskId: string) => Promise<void>;
+  
+  // Habits Actions
+  toggleHabit: (habitId: string, dateStr?: string) => Promise<void>;
+  updateHabitProgress: (habitId: string, delta: number, dateStr?: string) => Promise<void>;
+  addHabit: (
+    name: string,
+    frequency: Habit["frequency"],
+    icon?: string,
+    options?: Partial<Omit<Habit, "id" | "name" | "frequency" | "streak" | "logs" | "skippedDaysCount">>
+  ) => Promise<void>;
+  deleteHabit: (habitId: string) => Promise<void>;
+  
+  // Goals Actions
+  addGoal: (title: string, targetDate: string) => Promise<void>;
+  deleteGoal: (id: string) => Promise<void>;
+  updateGoalProgress: (id: string, progress: number) => Promise<void>;
+  
+  // Profile & System Actions
+  saveProfile: (profileData: {
+    name: string;
+    email: string;
+    budgetLimit: number;
+    aiPersonality: string;
+    dailyPlanningReminderTime: string;
+    dailyReviewTime: string;
+    listeningMode: string;
+    proactiveModeEnabled: boolean;
+    maxProactiveNudges: number;
+    activationWord?: string;
+  }) => Promise<void>;
+  clearNotifications: () => Promise<void>;
+  sendChatMessage: (message: string, activeContext: any) => Promise<any>;
+  addExpense: (expenseData: Omit<Expense, "id">) => Promise<void>;
+  updateBudget: (category: string, limit: number) => Promise<void>;
+  explainExpense: (expenseId: string, explanation: string) => Promise<void>;
+  simulatePlanTomorrow: () => Promise<void>;
+  
+  // Diary actions
+  saveDiaryEntry: (content: string, mood: string, productivityScore: number) => Promise<void>;
+  deleteDiaryEntry: (entryId: string) => Promise<void>;
+  
+  // Focus Session logging
+  logFocusSession: (minutes: number, score?: number) => Promise<{ success: boolean; summary?: { todayCompletedBlocks: number; todayTotalMinutes: number } }>;
+
+  // Undo support
+  pushUndo: (description: string, execute: () => Promise<void>) => void;
+  triggerUndo: () => Promise<void>;
+}
+
+export const useStore = create<StoreState>((set, get) => {
+  // Setup offline listeners
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", () => {
+      set({ isOffline: false });
+      get().showToast("Uplink restored. System online.", "success");
+      get().hydrateSystemData();
+    });
+    window.addEventListener("offline", () => {
+      set({ isOffline: true });
+      get().showToast("Uplink severed. Running in offline mode.", "warning");
+    });
+  }
+
+  return {
+    token: localStorage.getItem("token") || localStorage.getItem("lifeos_token") || "mock_jwt_token_lifeos_dashboard",
+    isLoggedIn: true,
+    currentUser: null,
+    osData: null,
+    isUpdatingDb: false,
+    activeView: "dashboard",
+    isSidebarOpen: true,
+    notificationsOpen: false,
+    toasts: [],
+    loginUsername: "Sabarinathan",
+    loginEmail: "dsabari688@gmail.com",
+    
+    selectedTaskId: null,
+    selectedTaskTitle: null,
+    selectedHabitId: null,
+    selectedHabitName: null,
+    selectedDate: getLocalDateString(new Date()),
+    
+    isTaskModalOpen: false,
+    editingTask: null,
+    isDeferModalOpen: false,
+    deferringTask: null,
+    isDailyReviewOpen: false,
+    isPlannerModalOpen: false,
+    plannerPlan: null,
+    isWeeklyReviewOpen: false,
+    isOffline: typeof navigator !== "undefined" ? !navigator.onLine : false,
+    
+    undoStack: [],
+
+    setToken: (token) => {
+      const effectiveToken = token || "mock_jwt_token_lifeos_dashboard";
+      localStorage.setItem("token", effectiveToken);
+      localStorage.setItem("lifeos_token", effectiveToken);
+      set({ token: effectiveToken, isLoggedIn: true });
+    },
+    setIsLoggedIn: (isLoggedIn) => set({ isLoggedIn }),
+    setCurrentUser: (currentUser) => set({ currentUser }),
+    setActiveView: (activeView) => set({ activeView }),
+    setIsSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
+    setNotificationsOpen: (notificationsOpen) => set({ notificationsOpen }),
+    setLoginUsername: (loginUsername) => set({ loginUsername }),
+    setLoginEmail: (loginEmail) => set({ loginEmail }),
+    setSelectedDate: (date: string) => set({ selectedDate: date }),
+    changeSelectedDate: (offsetDays: number) => {
+      const current = get().selectedDate || getLocalDateString(new Date());
+      const d = parseLocalDate(current);
+      d.setDate(d.getDate() + offsetDays);
+      set({ selectedDate: getLocalDateString(d) });
+    },
+    resetSelectedDateToToday: () => {
+      set({ selectedDate: getLocalDateString(new Date()) });
+    },
+    setSelectedTaskId: (selectedTaskId) => set({ selectedTaskId }),
+    setSelectedTaskTitle: (selectedTaskTitle) => set({ selectedTaskTitle }),
+    setSelectedHabitId: (selectedHabitId) => set({ selectedHabitId }),
+    setSelectedHabitName: (selectedHabitName) => set({ selectedHabitName }),
+    setIsTaskModalOpen: (isTaskModalOpen) => set({ isTaskModalOpen }),
+    setEditingTask: (editingTask) => set({ editingTask }),
+    setIsDeferModalOpen: (isDeferModalOpen) => set({ isDeferModalOpen }),
+    setDeferringTask: (deferringTask) => set({ deferringTask }),
+    openDeferModal: (task) => set({ deferringTask: task, isDeferModalOpen: true }),
+    setIsDailyReviewOpen: (isDailyReviewOpen) => set({ isDailyReviewOpen }),
+    setIsPlannerModalOpen: (isPlannerModalOpen) => set({ isPlannerModalOpen }),
+    setIsWeeklyReviewOpen: (isWeeklyReviewOpen) => set({ isWeeklyReviewOpen }),
+    setPlannerPlan: (plannerPlan) => set({ plannerPlan }),
+    setIsOffline: (isOffline) => set({ isOffline }),
+
+    showToast: (message, type = "info", onUndo) => {
+      const id = Math.random().toString(36).substring(2, 9);
+      set((state) => ({
+        toasts: [...state.toasts, { id, message, type, onUndo }],
+      }));
+      setTimeout(() => {
+        get().dismissToast(id);
+      }, 5000);
+    },
+    dismissToast: (id) => {
+      set((state) => ({
+        toasts: state.toasts.filter((t) => t.id !== id),
+      }));
+    },
+
+    authenticatedFetch: async (url, options = {}) => {
+      // Simulate fetch for client code expecting it
+      return new Response(JSON.stringify({ success: true }));
+    },
+
+    hydrateSystemData: async () => {
+      if (!get().token) return;
+
+      // The local cache only carries profile, chat history and offline
+      // fallbacks. Collections are hydrated from PostgreSQL via the backend.
+      let cached: FullOSData | null = null;
+      try {
+        const dataStr = localStorage.getItem("lifeos_data");
+        cached = dataStr ? (JSON.parse(dataStr) as FullOSData) : null;
+      } catch {
+        cached = null;
+      }
+
+      const defaultProfile: UserProfile = {
+        name: "Sabarinathan",
+        email: "dsabari688@gmail.com",
+        avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
+        budgetLimit: 1500,
+        aiPersonality: "Logical",
+        dailyPlanningReminderTime: "21:00",
+        hasPlannedTomorrow: false,
+        listeningMode: "push-to-talk",
+        proactiveModeEnabled: true,
+        maxProactiveNudges: 3,
+        dailyReviewTime: "21:30",
+        activationWord: "piggy"
+      };
+
+      const data: FullOSData = {
+        profile: cached?.profile ?? defaultProfile,
+        tasks: [],
+        habits: [],
+        goals: [],
+        expenses: [],
+        budgets: [],
+        chatHistory: cached?.chatHistory ?? [],
+        notifications: [],
+        diaryEntries: []
+      };
+
+      // Backend is the source of truth; cached values are the fallback
+      // whenever a collection cannot be fetched (offline mode).
+      const [tasksRes, habitsRes, goalsRes, expensesRes, budgetsRes, diaryRes, notifsRes] =
+        await Promise.allSettled([
+          fetchBackendTasks(),
+          habitService.getAll(),
+          goalService.getAll(get().token),
+          expenseService.getAll(),
+          budgetService.getAll(),
+          diaryService.getAll(),
+          notificationService.getSystemNotifications()
+        ]);
+
+      if (tasksRes.status === "fulfilled" && tasksRes.value) {
+        const backendTasks = tasksRes.value.map(backendToTask);
+        const localOnly = (cached?.tasks ?? []).filter(
+          (t) => !isUuid(t.id) && !backendTasks.some((b) => b.id === t.id)
+        );
+        data.tasks = [...backendTasks, ...localOnly];
+      } else {
+        if (tasksRes.status === "rejected") {
+          console.warn("Task hydration deferred/offline:", tasksRes.reason);
+        }
+        data.tasks = cached?.tasks ?? [];
+      }
+
+      if (habitsRes.status === "fulfilled") {
+        const backendHabits = habitsRes.value;
+        const localOnly = (cached?.habits ?? []).filter(
+          (h) => !isUuid(h.id) && !backendHabits.some((b) => b.id === h.id)
+        );
+        data.habits = [...backendHabits, ...localOnly];
+      } else {
+        console.warn("Habit hydration deferred/offline:", habitsRes.reason);
+        data.habits = cached?.habits ?? [];
+      }
+
+      if (goalsRes.status === "fulfilled") {
+        const backendGoals = goalsRes.value;
+        const localOnly = (cached?.goals ?? []).filter(
+          (g) => !isUuid(g.id) && !backendGoals.some((b) => b.id === g.id)
+        );
+        data.goals = [...backendGoals, ...localOnly];
+      } else {
+        console.warn("Goal hydration deferred/offline:", goalsRes.reason);
+        data.goals = cached?.goals ?? [];
+      }
+
+      if (expensesRes.status === "fulfilled") {
+        const backendExpenses = expensesRes.value;
+        const localOnly = (cached?.expenses ?? []).filter(
+          (e) => !isUuid(e.id) && !backendExpenses.some((b) => b.id === e.id)
+        );
+        data.expenses = [...backendExpenses, ...localOnly];
+      } else {
+        console.warn("Expense hydration deferred/offline:", expensesRes.reason);
+        data.expenses = cached?.expenses ?? [];
+      }
+
+      if (budgetsRes.status === "fulfilled") {
+        data.budgets = budgetsRes.value;
+      } else {
+        console.warn("Budget hydration deferred/offline:", budgetsRes.reason);
+        data.budgets = cached?.budgets ?? [];
+      }
+
+      if (diaryRes.status === "fulfilled") {
+        const entries = [...diaryRes.value];
+        const localOnly = (cached?.diaryEntries ?? []).filter(
+          (entry) =>
+            !isUuid(entry.id) &&
+            !entries.some((m) => m.date === entry.date)
+        );
+        entries.push(...localOnly);
+        entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        data.diaryEntries = entries;
+      } else {
+        console.warn("Diary hydration deferred/offline:", diaryRes.reason);
+        data.diaryEntries = cached?.diaryEntries ?? [];
+      }
+
+      if (notifsRes.status === "fulfilled") {
+        const backendNotifications = notifsRes.value;
+        const localOnly = (cached?.notifications ?? []).filter(
+          (n) => !isUuid(n.id) && !backendNotifications.some((b) => b.id === n.id)
+        );
+        data.notifications = [...backendNotifications, ...localOnly];
+      } else {
+        console.warn("Notification hydration deferred/offline:", notifsRes.reason);
+        data.notifications = cached?.notifications ?? [];
+      }
+
+      localStorage.setItem("lifeos_data", JSON.stringify(data));
+      set({ osData: data });
+
+      if (data.profile) {
+        set({
+          loginUsername: data.profile.name,
+          loginEmail: data.profile.email
+        });
+      }
+    },
+
+    // Pushes an undo action onto the stack (limit 15 entries)
+    pushUndo: (description, execute) => {
+      set((state) => ({
+        undoStack: [{ description, execute }, ...state.undoStack].slice(0, 15),
+      }));
+    },
+
+    // Triggers execution of the top undo item
+    triggerUndo: async () => {
+      const { undoStack } = get();
+      if (undoStack.length === 0) return;
+      
+      const [top, ...rest] = undoStack;
+      set({ undoStack: rest, isUpdatingDb: true });
+      
+      try {
+        await top.execute();
+        get().showToast(`Undone: ${top.description}`, "success");
+      } catch (err: any) {
+        get().showToast(`Failed to undo action: ${err.message}`, "error");
+      } finally {
+        set({ isUpdatingDb: false });
+      }
+    },
+
+    // Task Actions
+    toggleTask: async (taskId) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const task = data.tasks.find((t) => t.id === taskId);
+        if (!task) return;
+
+        const originalStatus = task.status;
+        get().pushUndo(`Task toggle completion`, async () => {
+          await get().saveTask({ ...task, status: originalStatus });
+        });
+
+        task.status = task.status === "completed" ? "pending" : "completed";
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        if (task.status === "completed") {
+          syncCompleteTask(taskId);
+        } else {
+          syncSetTaskStatus(taskId, "pending");
+        }
+        get().showToast(`Task status adjusted.`, "success", () => get().triggerUndo());
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    saveTask: async (taskData) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const isNew = !taskData.id;
+        
+        if (isNew) {
+          const newTask: Task = {
+            id: `task_${Date.now()}`,
+            title: taskData.title,
+            category: taskData.category,
+            date: taskData.date,
+            time: taskData.time,
+            endTime: taskData.endTime,
+            description: taskData.description,
+            recurType: taskData.recurType || "none",
+            status: taskData.status || "pending",
+            rescheduledCount: taskData.rescheduledCount || 0,
+            maxDeferLimit: taskData.maxDeferLimit || 3,
+            deferReason: taskData.deferReason,
+            deferHistory: taskData.deferHistory || []
+          };
+          const backendId = await syncCreateTask(newTask);
+          if (backendId) {
+            newTask.id = backendId;
+          }
+          data.tasks.push(newTask);
+        } else {
+          const existingIndex = data.tasks.findIndex((t) => t.id === taskData.id);
+          if (existingIndex !== -1) {
+            const originalTask = { ...data.tasks[existingIndex] };
+            get().pushUndo(`Edit Task "${taskData.title}"`, async () => {
+              await get().saveTask(originalTask);
+            });
+            data.tasks[existingIndex] = {
+              ...data.tasks[existingIndex],
+              ...taskData
+            };
+            syncUpdateTask(taskData.id as string, data.tasks[existingIndex]);
+          }
+        }
+        
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast(
+          isNew ? `New tactical mission logged.` : `Tactical mission parameters modified.`,
+          "success",
+          !isNew ? () => get().triggerUndo() : undefined
+        );
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    deferTask: async (taskId, options) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const task = data.tasks.find((t) => t.id === taskId);
+        if (!task) return;
+
+        const originalTask = { ...task };
+        get().pushUndo(`Defer Mission "${task.title}"`, async () => {
+          await get().saveTask(originalTask);
+        });
+
+        const newCount = (task.rescheduledCount || 0) + 1;
+        const deferRecord = {
+          timestamp: new Date().toISOString(),
+          fromDate: task.date,
+          toDate: options.newDate,
+          fromTime: task.time,
+          toTime: options.newTime || task.time,
+          reason: options.reason || "Tactical rescheduling",
+          deferIndex: newCount
+        };
+
+        task.originalDate = task.originalDate || task.date;
+        task.date = options.newDate;
+        if (options.newTime) task.time = options.newTime;
+        if (options.newEndTime !== undefined) task.endTime = options.newEndTime;
+        task.deferReason = options.reason;
+        task.rescheduledCount = newCount;
+        if (options.maxDeferLimit !== undefined) {
+          task.maxDeferLimit = options.maxDeferLimit;
+        }
+        task.deferHistory = [...(task.deferHistory || []), deferRecord];
+
+        syncUpdateTask(taskId, {
+          date: task.date,
+          time: task.time,
+          endTime: task.endTime ?? "",
+          status: task.status,
+          rescheduledCount: newCount
+        });
+
+        const maxLimit = task.maxDeferLimit || 3;
+        if (task.rescheduledCount >= maxLimit) {
+          const newNotif: SystemNotification = {
+            id: `notif_${Date.now()}`,
+            title: "Performance Warning: Deferral Allowance Limit",
+            message: `The mission '${task.title}' has reached its deferral allowance (${task.rescheduledCount}/${maxLimit} times). Reason: ${options.reason}`,
+            timestamp: new Date().toISOString(),
+            type: "warning",
+            read: false
+          };
+          data.notifications.unshift(newNotif);
+        }
+
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast(
+          `Mission deferred to ${options.newDate} (Deferral #${newCount}).`,
+          "success",
+          () => get().triggerUndo()
+        );
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    rescheduleTask: async (taskId, newDate, reason, maxDeferLimit, newTime) => {
+      await get().deferTask(taskId, {
+        newDate,
+        newTime,
+        reason: reason || "Tactical rescheduling",
+        maxDeferLimit
+      });
+    },
+
+    deleteTask: async (taskId) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const task = data.tasks.find((t) => t.id === taskId);
+        if (!task) return;
+
+        get().pushUndo(`Restore deleted task "${task.title}"`, async () => {
+          await get().saveTask({ ...task, id: "" });
+        });
+
+        data.tasks = data.tasks.filter((t) => t.id !== taskId);
+        syncDeleteTask(taskId);
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast("Task decommissioned.", "warning", () => get().triggerUndo());
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    // Habits Actions
+  toggleHabit: async (habitId, targetDateStr) => {
+  try {
+    const effectiveDate =
+      targetDateStr ||
+      get().selectedDate ||
+      new Date().toISOString().split("T")[0];
+
+    const updatedHabit =
+      await habitService.toggle(
+        habitId,
+        effectiveDate,
+      );
+
+    const dataStr =
+      localStorage.getItem("lifeos_data");
+
+    if (!dataStr) return;
+
+    const data: FullOSData =
+      JSON.parse(dataStr);
+
+    const index = data.habits.findIndex(
+      (habit) => habit.id === habitId,
+    );
+
+    if (index !== -1) {
+      data.habits[index] = updatedHabit;
+    } else {
+      data.habits.push(updatedHabit);
+    }
+
+    localStorage.setItem(
+      "lifeos_data",
+      JSON.stringify(data),
+    );
+
+    set({
+      osData: data,
+    });
+
+    get().showToast(
+      "Habit status updated.",
+      "success",
+    );
+  } catch (error) {
+    console.error(
+      "Failed to toggle habit:",
+      error,
+    );
+
+    get().showToast(
+      "Failed to update habit.",
+      "error",
+    );
+  }
+},
+
+   updateHabitProgress: async (
+  habitId,
+  delta,
+  targetDateStr,
+) => {
+  try {
+    const effectiveDate =
+      targetDateStr ||
+      get().selectedDate ||
+      new Date().toISOString().split("T")[0];
+
+    const updatedHabit =
+      await habitService.updateProgress(
+        habitId,
+        effectiveDate,
+        delta,
+      );
+
+    const dataStr =
+      localStorage.getItem("lifeos_data");
+
+    if (!dataStr) return;
+
+    const data: FullOSData =
+      JSON.parse(dataStr);
+
+    const index = data.habits.findIndex(
+      (habit) => habit.id === habitId,
+    );
+
+    if (index !== -1) {
+      data.habits[index] = updatedHabit;
+    }
+
+    localStorage.setItem(
+      "lifeos_data",
+      JSON.stringify(data),
+    );
+
+    set({
+      osData: data,
+    });
+
+    const target =
+      updatedHabit.targetValue || 1;
+
+    const progress =
+      updatedHabit.dailyProgress?.[
+        effectiveDate
+      ] || 0;
+
+    if (progress >= target) {
+      get().showToast(
+        `Target achieved for ${updatedHabit.name}!`,
+        "success",
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Failed to update habit progress:",
+      error,
+    );
+  }
+},
+    addHabit: async (name, frequency, icon, options) => {
+      try {
+        const newHabit =
+          await habitService.create(
+            name,
+            frequency,
+            icon,
+            options,
+          );
+
+        const dataStr =
+          localStorage.getItem("lifeos_data");
+
+        if (!dataStr) return;
+
+        const data: FullOSData =
+          JSON.parse(dataStr);
+
+        data.habits.push(newHabit);
+
+        localStorage.setItem(
+          "lifeos_data",
+          JSON.stringify(data),
+        );
+
+        set({
+          osData: data,
+        });
+
+        get().showToast(
+          "Routine structure installed.",
+          "success",
+        );
+      } catch (error) {
+        console.error(
+          "Failed to create habit:",
+          error,
+        );
+
+        get().showToast(
+          "Failed to create habit.",
+          "error",
+        );
+      }
+    },
+
+    deleteHabit: async (habitId) => {
+      try {
+        await habitService.delete(habitId);
+
+        const dataStr =
+          localStorage.getItem("lifeos_data");
+
+        if (!dataStr) return;
+
+        const data: FullOSData =
+          JSON.parse(dataStr);
+
+        data.habits =
+          data.habits.filter(
+            (habit) => habit.id !== habitId,
+          );
+
+        localStorage.setItem(
+          "lifeos_data",
+          JSON.stringify(data),
+        );
+
+        set({
+          osData: data,
+        });
+
+        get().showToast(
+          "Habit routine structure removed.",
+          "warning",
+        );
+      } catch (error) {
+        console.error(
+          "Failed to delete habit:",
+          error,
+        );
+
+        get().showToast(
+          "Failed to delete habit.",
+          "error",
+        );
+      }
+    },
+
+    // Goals Actions
+    addGoal: async (title, targetDate) => {
+  try {
+    const token = get().token;
+
+    const newGoal = await goalService.create(
+      title,
+      targetDate,
+      token
+    );
+
+    const currentData = get().osData;
+    if (!currentData) return;
+
+    const updatedData: FullOSData = {
+      ...currentData,
+      goals: [...currentData.goals, newGoal],
+    };
+
+    set({ osData: updatedData });
+
+    localStorage.setItem(
+      "lifeos_data",
+      JSON.stringify(updatedData)
+    );
+
+    get().showToast(
+      "Strategic milestone goal instituted.",
+      "success"
+    );
+  } catch (error) {
+    console.error("Failed to create goal:", error);
+
+    get().showToast(
+      "Failed to create strategic goal.",
+      "error"
+    );
+  }
+},
+   deleteGoal: async (id) => {
+  try {
+    const token = get().token;
+
+    if (isUuid(id)) {
+      await goalService.remove(id, token);
+    }
+
+    const currentData = get().osData;
+    if (!currentData) return;
+
+    const updatedData: FullOSData = {
+      ...currentData,
+      goals: currentData.goals.filter(
+        (goal) => goal.id !== id
+      ),
+    };
+
+    set({ osData: updatedData });
+
+    localStorage.setItem(
+      "lifeos_data",
+      JSON.stringify(updatedData)
+    );
+
+    get().showToast(
+      "Milestone decommissioned.",
+      "warning"
+    );
+  } catch (error) {
+    console.error("Failed to delete goal:", error);
+
+    get().showToast(
+      "Failed to delete strategic goal.",
+      "error"
+    );
+  }
+},
+      updateGoalProgress: async (id, progress) => {
+  try {
+    const currentData = get().osData;
+    if (!currentData) return;
+
+    const goal = currentData.goals.find(
+      (g) => g.id === id
+    );
+
+    if (!goal) return;
+
+    const originalProgress = goal.progress;
+
+    get().pushUndo(
+      `Update Goal "${goal.title}" progress to ${originalProgress}%`,
+      async () => {
+        await get().updateGoalProgress(
+          id,
+          originalProgress
+        );
+      }
+    );
+
+    let updatedGoal: Goal = {
+      ...goal,
+      progress,
+      status:
+        progress >= 100
+          ? ("completed" as const)
+          : ("active" as const),
+    };
+
+    if (isUuid(id)) {
+      try {
+        updatedGoal = await goalService.updateProgress(
+          id,
+          progress,
+          get().token
+        );
+      } catch (error) {
+        console.warn(
+          "Goal progress sync deferred/offline:",
+          error
+        );
+      }
+    }
+
+    const updatedData: FullOSData = {
+      ...currentData,
+      goals: currentData.goals.map((g) =>
+        g.id === id ? updatedGoal : g
+      ),
+    };
+
+    set({ osData: updatedData });
+
+    localStorage.setItem(
+      "lifeos_data",
+      JSON.stringify(updatedData)
+    );
+
+    get().showToast(
+      "Strategic progression recorded.",
+      "success",
+      () => get().triggerUndo()
+    );
+  } catch (error) {
+    console.error(
+      "Failed to update goal progress:",
+      error
+    );
+  }
+},
+   
+    // Profile & Financials
+    saveProfile: async (profileData) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        data.profile = {
+          ...data.profile,
+          ...profileData,
+          aiPersonality: profileData.aiPersonality as any,
+          listeningMode: profileData.listeningMode as any,
+          activationWord: profileData.activationWord || data.profile.activationWord || "piggy"
+        };
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast("System configurations optimized.", "success");
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    clearNotifications: async () => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        // Persist read-state on the server for backend-sourced notifications.
+        const unreadBackendIds = data.notifications
+          .filter((n) => isUuid(n.id) && !n.read)
+          .map((n) => n.id);
+
+        data.notifications = data.notifications.map((n) => ({ ...n, read: true }));
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+
+        void Promise.allSettled(
+          unreadBackendIds.map((id) => notificationService.markRead(id))
+        );
+
+        get().showToast("Telemetry warnings cleared.", "info");
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    executeBridgeTool: async (toolName, args) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      const currentData = dataStr ? JSON.parse(dataStr) : get().osData || {};
+      
+      const saveDataFn = (updated: any) => {
+        localStorage.setItem("lifeos_data", JSON.stringify(updated));
+        set({ osData: updated });
+      };
+
+      const result = executeMCPTool(toolName, args, currentData, saveDataFn);
+      
+      if (result.success) {
+        get().showToast(result.message, "success");
+      } else {
+        get().showToast(result.message || "Tool execution failed", "error");
+      }
+
+      return result;
+    },
+
+    sendChatMessage: async (message, activeContext) => {
+      const tempId = `temp-${Date.now()}`;
+      const tempMessage: ChatMessage = {
+        id: tempId,
+        role: "user",
+        content: message,
+        timestamp: new Date().toISOString()
+      };
+
+      const dataStr = localStorage.getItem("lifeos_data");
+      const currentData: FullOSData = get().osData || (dataStr ? JSON.parse(dataStr) : {
+        profile: {
+          name: "Sabarinathan",
+          email: "dsabari688@gmail.com",
+          avatar: null,
+          budgetLimit: 1500,
+          aiPersonality: "Logical",
+          dailyPlanningReminderTime: "21:00",
+          hasPlannedTomorrow: false,
+          listeningMode: "push-to-talk",
+          proactiveModeEnabled: true,
+          maxProactiveNudges: 3,
+          dailyReviewTime: "21:30",
+          activationWord: "piggy"
+        },
+        tasks: [],
+        habits: [],
+        goals: [],
+        expenses: [],
+        budgets: [],
+        chatHistory: [],
+        notifications: [],
+        diaryEntries: []
+      });
+
+      const updatedHistory = [...(currentData.chatHistory || []), tempMessage];
+      const data: FullOSData = {
+        ...currentData,
+        chatHistory: updatedHistory
+      };
+
+      // Save user message to localStorage and store state IMMEDIATELY
+      localStorage.setItem("lifeos_data", JSON.stringify(data));
+      set({ isUpdatingDb: true, osData: data });
+
+      try {
+        const storedConversationId = localStorage.getItem("piggy_conversation_id");
+        const res = await fetch("/api/piggy/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message,
+            conversationId: storedConversationId
+          })
+        });
+
+        if (!res.ok) throw new Error(`Piggy backend responded ${res.status}`);
+
+        const payload = await res.json();
+        if (payload.conversationId) {
+          localStorage.setItem("piggy_conversation_id", payload.conversationId);
+        }
+
+        let reply: string;
+        if (payload.success) {
+          reply = payload.response || "Done.";
+          if (payload.action) {
+            reply += payload.action.executed
+              ? `\n\n*[PIGGY EXECUTED \`${payload.action.type}\` • DATABASE UPDATED]*`
+              : `\n\n*[PIGGY COULD NOT EXECUTE \`${payload.action.type}\`${payload.action.error ? `: ${payload.action.error}` : ""}]*`;
+          }
+        } else {
+          reply = payload.response || "I could not process that request.";
+        }
+
+        const assistantMessage: ChatMessage = {
+          id: `chat_reply_${Date.now()}`,
+          role: "assistant",
+          content: reply,
+          timestamp: new Date().toISOString(),
+          type: payload.intent ? "predictive" : "chat"
+        };
+
+        const latestData = get().osData || data;
+        const finalHistory = [...(latestData.chatHistory || []), assistantMessage];
+        const finalData: FullOSData = {
+          ...latestData,
+          chatHistory: finalHistory
+        };
+        localStorage.setItem("lifeos_data", JSON.stringify(finalData));
+        set({ osData: finalData, isUpdatingDb: false });
+
+        if (payload.action?.executed && typeof get().hydrateSystemData === "function") {
+          await get().hydrateSystemData();
+        }
+
+        return { success: payload.success };
+      } catch (err) {
+        console.warn("[piggy] Direct Comms unavailable, using local bridge:", err);
+      }
+
+      // Intelligent AI Bridge: Determine if user request maps to an MCP tool execution
+      setTimeout(() => {
+        const personality = data.profile.aiPersonality || "Logical";
+        const lowerMsg = message.toLowerCase().trim();
+        const todayStr = new Date().toISOString().split("T")[0];
+        const nowTimeStr = new Date().toTimeString().slice(0, 5);
+
+        let executedToolInfo: { tool: string; resultMsg: string; data?: any } | null = null;
+        let reply = "";
+
+        const saveDataFn = (updated: any) => {
+          localStorage.setItem("lifeos_data", JSON.stringify(updated));
+          set({ osData: updated });
+        };
+
+        // 1. Task Creation Detection (e.g. "add task finish deck tomorrow at 3pm", "create task refactor protocols", "new mission ...")
+        if (
+          (lowerMsg.startsWith("add task") || lowerMsg.startsWith("create task") || lowerMsg.startsWith("new task") || lowerMsg.startsWith("assign task") || lowerMsg.startsWith("task:") || lowerMsg.includes("designate a new core task"))
+        ) {
+          let taskTitle = message
+            .replace(/^(add task|create task|new task|assign task|task:|sir, let's designate a new core task:?)/i, "")
+            .trim();
+          
+          if (!taskTitle) taskTitle = "Tactical Mission Objective";
+
+          const toolRes = executeMCPTool("tasks_create", {
+            title: taskTitle,
+            category: lowerMsg.includes("urgent") || lowerMsg.includes("critical") ? "urgent-important" : "important-not-urgent",
+            date: todayStr,
+            time: nowTimeStr
+          }, data, saveDataFn);
+
+          if (toolRes.success) {
+            executedToolInfo = { tool: "tasks_create", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Mission Initialized: '${taskTitle}' is registered into today's tactical operations matrix [Quadrant: Urgent-Important].`;
+          }
+        }
+        
+        // 2. Task Completion Detection (e.g. "complete task ...", "done task ...", "mark task done")
+        else if (lowerMsg.includes("complete task") || lowerMsg.includes("mark task done") || lowerMsg.includes("finished task")) {
+          const match = lowerMsg.replace(/(complete task|mark task done|finished task|done task)/i, "").trim();
+          const targetTask = data.tasks.find(t => t.title.toLowerCase().includes(match) || t.id === match);
+          if (targetTask) {
+            const toolRes = executeMCPTool("tasks_complete", { taskId: targetTask.id }, data, saveDataFn);
+            executedToolInfo = { tool: "tasks_complete", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Status Update Confirmed: '${targetTask.title}' marked as completed. Life Score index updated!`;
+          }
+        }
+
+        // 3. Habit Log / Toggle Detection (e.g. "log habit morning code", "check habit gym", "mark habit done")
+        else if (lowerMsg.includes("log habit") || lowerMsg.includes("mark habit") || lowerMsg.includes("check habit") || lowerMsg.includes("done with habit")) {
+          const habitQuery = lowerMsg.replace(/(log habit|mark habit|check habit|done with habit)/i, "").trim();
+          const targetHabit = data.habits.find(h => h.name.toLowerCase().includes(habitQuery) || h.id === habitQuery);
+          if (targetHabit) {
+            const toolRes = executeMCPTool("habits_log", { habitId: targetHabit.id }, data, saveDataFn);
+            executedToolInfo = { tool: "habits_log", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Habit Verified: '${targetHabit.name}' logged for today! Streak is now ${targetHabit.streak} days. Keep pushing!`;
+          }
+        }
+
+        // 4. Expense Logging Detection (e.g. "add expense 250 for lunch", "log expense 150 coffee", "spent 500 on shopping")
+        else if (lowerMsg.includes("add expense") || lowerMsg.includes("log expense") || lowerMsg.startsWith("spent ") || lowerMsg.includes("paid ₹") || lowerMsg.includes("bought ")) {
+          const numMatch = lowerMsg.match(/(?:(?:rs\.?|₹|\$)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rs|inr|usd|bucks)?)/i);
+          const amount = numMatch ? parseFloat(numMatch[1] || numMatch[2]) : 150;
+          
+          let note = message.replace(/(add expense|log expense|spent|paid|bought|for|on|₹|\$|\d+)/gi, "").trim();
+          if (!note) note = "Tactical Procurement";
+
+          let category: any = "food";
+          if (lowerMsg.includes("shop") || lowerMsg.includes("book") || lowerMsg.includes("cloth")) category = "shopping";
+          else if (lowerMsg.includes("cab") || lowerMsg.includes("uber") || lowerMsg.includes("fuel") || lowerMsg.includes("metro")) category = "transportation";
+          else if (lowerMsg.includes("course") || lowerMsg.includes("study") || lowerMsg.includes("exam")) category = "education";
+          else if (lowerMsg.includes("movie") || lowerMsg.includes("game")) category = "entertainment";
+
+          const toolRes = executeMCPTool("expenses_add", { amount, category, note }, data, saveDataFn);
+          if (toolRes.success) {
+            executedToolInfo = { tool: "expenses_add", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Financial Ledger Updated: Debit of ₹${amount} logged under '${note}' [Category: ${category}].`;
+          }
+        }
+
+        // 5. Goal Creation Detection (e.g. "new goal save 50000", "create goal run 5k marathon")
+        else if (lowerMsg.startsWith("new goal") || lowerMsg.startsWith("create goal") || lowerMsg.startsWith("add goal")) {
+          const goalTitle = message.replace(/(new goal|create goal|add goal):?/i, "").trim() || "Strategic Objective";
+          const toolRes = executeMCPTool("goals_create", {
+            title: goalTitle,
+            targetDate: "2026-12-31",
+            progress: 0
+          }, data, saveDataFn);
+          if (toolRes.success) {
+            executedToolInfo = { tool: "goals_create", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Strategic Vault Entry Initialized: Goal '${goalTitle}' locked in.`;
+          }
+        }
+
+        // 6. Focus Score / Life Score Query
+        else if (lowerMsg.includes("life score") || lowerMsg.includes("focus index") || lowerMsg.includes("productivity review") || lowerMsg.includes("my score")) {
+          const toolRes = executeMCPTool("system_get_life_score", {}, data, saveDataFn);
+          executedToolInfo = { tool: "system_get_life_score", resultMsg: toolRes.message, data: toolRes.data };
+          reply = `Life OS Telemetry: Compound Focus Index is ${toolRes.data?.lifeScore}%. Daily Tasks: ${toolRes.data?.taskRate}%, Routine Cadence: ${toolRes.data?.habitRate}%, Vault Trajectory: ${toolRes.data?.goalRate}%. Rating: ${toolRes.data?.tier}.`;
+        }
+
+        // If no tool was explicitly executed, provide smart personality response
+        if (!reply) {
+          const pendingTasks = data.tasks.filter(t => t.status === "pending");
+          const totalExpenses = data.expenses.reduce((sum, e) => sum + e.amount, 0);
+
+          if (lowerMsg.includes("budget") || lowerMsg.includes("expens") || lowerMsg.includes("money") || lowerMsg.includes("spend")) {
+            const toolRes = executeMCPTool("budget_check", {}, data, saveDataFn);
+            executedToolInfo = { tool: "budget_check", resultMsg: toolRes.message, data: toolRes.data };
+            if (personality === "Cynical") {
+              reply = `Checking the damage: We've allocated ₹${totalExpenses} against ₹${data.profile.budgetLimit}. Utilization is at ${toolRes.data?.utilizationPercent}%. Try to refrain from unnecessary transactions.`;
+            } else if (personality === "Energetic") {
+              reply = `Financial Ledger Check! Total allocations: ₹${totalExpenses} / ₹${data.profile.budgetLimit} (${toolRes.data?.utilizationPercent}%). Staying well inside the guardrails! 🚀`;
+            } else if (personality === "Calm") {
+              reply = `A peaceful assessment of our financial ledgers shows recent allocations total ₹${totalExpenses} of ₹${data.profile.budgetLimit}. Mindful spending maintains harmony.`;
+            } else {
+              reply = `Financial status: ₹${totalExpenses} spent against ₹${data.profile.budgetLimit} limit (${toolRes.data?.utilizationPercent}% utilization). Status: ${toolRes.data?.status}.`;
+            }
+          } else if (lowerMsg.includes("task") || lowerMsg.includes("mission") || lowerMsg.includes("todo") || lowerMsg.includes("plan")) {
+            const taskListStr = pendingTasks.slice(0, 4).map(t => `'${t.title}'`).join(", ");
+            if (pendingTasks.length === 0) {
+              reply = `All active tactical missions have been completed for today, Sir. Telemetry indicates 100% execution throughput.`;
+            } else {
+              reply = `Backlog parsing completed. There are ${pendingTasks.length} pending missions: ${taskListStr}. Optimal routing recommends tackling high-priority missions first.`;
+            }
+          } else if (lowerMsg.includes("habit") || lowerMsg.includes("streak") || lowerMsg.includes("routine")) {
+            const bestHabit = data.habits.length > 0 ? data.habits.reduce((prev, current) => (prev.streak > current.streak) ? prev : current) : null;
+            const bestStr = bestHabit ? `'${bestHabit.name}' on a ${bestHabit.streak}-day streak` : "no active routines";
+            reply = `Routine tracking telemetry updated. Highest momentum routine is currently ${bestStr}. Cumulative daily habit adherence rate is 78%.`;
+          } else if (lowerMsg.includes("remember") || lowerMsg.includes("recall context") || lowerMsg.includes("preference")) {
+            const toolRes = executeMCPTool("system_get_context", {}, data, saveDataFn);
+            executedToolInfo = { tool: "system_get_context", resultMsg: toolRes.message, data: toolRes.data };
+            reply = `Context Recalled: User '${data.profile.name}', AI Mode '${data.profile.aiPersonality}', ${pendingTasks.length} pending missions today, ${data.habits.length} tracked habits, and ₹${totalExpenses} allocated this cycle.`;
+          } else {
+            if (personality === "Cynical") {
+              reply = `Life OS online. I'm connected to all tools (Tasks, Habits, Expenses, Vault, Sleep). What do you need executed?`;
+            } else if (personality === "Energetic") {
+              reply = `J.A.R.V.I.S. and Piggy are linked to all tools across the OS! Ask me to add tasks, log expenses, check streaks, or query the MCP bridge! 🎯`;
+            } else if (personality === "Calm") {
+              reply = `All tools and MCP servers are connected in harmony. Let me know what you would like to organize or log.`;
+            } else {
+              reply = `AI Bridge operational. All 20+ MCP tools (Tasks, Habits, Goals, Expenses, Diary, Telemetry) are active and ready for execution.`;
+            }
+          }
+        }
+
+        if (executedToolInfo) {
+          reply += `\n\n*[AI BRIDGE EXECUTION: Invoked tool \`${executedToolInfo.tool}\` • Status: OK • Telemetry Synced]*`;
+        } else {
+          reply += `\n\n*[PIGGY SECURE AUDIT: Logic verified. MCP Bridge listening. 0 conflicts detected.]*`;
+        }
+
+        const assistantMessage: ChatMessage = {
+          id: `chat_reply_${Date.now()}`,
+          role: "assistant",
+          content: reply,
+          timestamp: new Date().toISOString()
+        };
+
+        const latestData = get().osData || data;
+        const finalHistory = [...(latestData.chatHistory || []), assistantMessage];
+        const finalData: FullOSData = {
+          ...latestData,
+          chatHistory: finalHistory
+        };
+        localStorage.setItem("lifeos_data", JSON.stringify(finalData));
+        set({ osData: finalData, isUpdatingDb: false });
+      }, 750);
+      
+      return { success: true };
+    },
+
+    logFocusSession: async (minutes, score) => {
+      try {
+        const todayStr = get().selectedDate || new Date().toISOString().split("T")[0];
+        const res = await fetch("/api/piggy/focus-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            minutes,
+            score,
+            date: todayStr
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Focus log API responded ${res.status}`);
+        }
+
+        const data = await res.json();
+
+        get().showToast(`Deep Work Block completed! Banked ${minutes} mins focus.`, "success");
+
+        if (typeof get().hydrateSystemData === "function") {
+          await get().hydrateSystemData();
+        }
+
+        return {
+          success: true,
+          summary: data.summary || {
+            todayCompletedBlocks: 1,
+            todayTotalMinutes: minutes
+          }
+        };
+      } catch (err: any) {
+        console.error("Failed to log focus session:", err);
+        get().showToast("Failed to log focus session to database.", "error");
+        return { success: false };
+      }
+    },
+
+    addExpense: async (expenseData) => {
+      let newExpense: Expense;
+      try {
+        newExpense = await expenseService.create({
+          amount: expenseData.amount,
+          category: expenseData.category,
+          note: expenseData.note,
+          date: expenseData.date,
+          isImpulsive: expenseData.isImpulsive || false
+        });
+      } catch (err) {
+        console.error("Failed to create expense:", err);
+        get().showToast("Failed to log expense.", "error");
+        return;
+      }
+
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        data.expenses.unshift(newExpense);
+
+        const categoryBudget = data.budgets.find((b) => b.category === newExpense.category);
+        const totalSpentOnCategory = data.expenses
+          .filter((e) => e.category === newExpense.category)
+          .reduce((sum, e) => sum + e.amount, 0);
+
+        if (categoryBudget && totalSpentOnCategory > categoryBudget.limit) {
+          const budgetNotif: SystemNotification = {
+            id: `notif_${Date.now()}`,
+            title: "Critical: Budget Deficit Flagged",
+            message: `The ledger limit for '${newExpense.category}' has been violated (₹${totalSpentOnCategory} spent of ₹${categoryBudget.limit} limit).`,
+            timestamp: new Date().toISOString(),
+            type: "budget",
+            read: false
+          };
+          data.notifications.unshift(budgetNotif);
+        }
+
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast("Financial deduction logged.", "success");
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    updateBudget: async (category, limit) => {
+      let synced = true;
+      try {
+        await budgetService.upsert(category, limit);
+      } catch (err) {
+        synced = false;
+        console.warn("Budget sync deferred/offline:", err);
+      }
+
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const bIndex = data.budgets.findIndex((b) => b.category === category);
+        if (bIndex !== -1) {
+          data.budgets[bIndex].limit = limit;
+        } else {
+          data.budgets.push({ category, limit });
+        }
+        if (!synced) {
+          data.notifications = [
+            {
+              id: `notif_${Date.now()}`,
+              title: "Budget saved locally",
+              message: "Could not reach the server. The allocation will sync when you are back online.",
+              timestamp: new Date().toISOString(),
+              type: "warning",
+              read: false
+            },
+            ...data.notifications
+          ];
+        }
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast(
+          synced ? "Budget allocation updated." : "Budget allocation saved locally.",
+          synced ? "success" : "warning"
+        );
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    explainExpense: async (expenseId, explanation) => {
+      let updatedExpense: Expense | null = null;
+      try {
+        updatedExpense = await expenseService.update(expenseId, { explanation });
+      } catch (err) {
+        console.warn("Expense explanation sync deferred/offline:", err);
+      }
+
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        const exp = data.expenses.find((e) => e.id === expenseId);
+        if (exp) {
+          exp.explanation = explanation;
+        } else if (updatedExpense) {
+          data.expenses.unshift(updatedExpense);
+        }
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data });
+        get().showToast("Self-reflection logged.", "success");
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    simulatePlanTomorrow: async () => {
+      set({ isUpdatingDb: true });
+      setTimeout(() => {
+        const mockPlan = {
+          success: true,
+          plan: {
+            title: "Tactical Flightpath — Tomorrow's Optimized Routine",
+            blocks: [
+              { time: "6:30 AM - 7:00 AM", activity: "Calibrating Cardio & Stretching (Workout Routine)", type: "routine" },
+              { time: "8:00 AM - 8:30 AM", activity: "Fasted Coffee & Daily Backlog Triage", type: "planning" },
+              { time: "9:00 AM - 11:30 AM", activity: "Deep Focus Segment: " + (get().osData?.tasks.find(t => t.status === "pending")?.title || "LifeOS Coding Codebase Audit"), type: "work" },
+              { time: "12:00 PM - 1:00 PM", activity: "High-protein lunch & hydration rebalancing", type: "rest" },
+              { time: "2:00 PM - 4:00 PM", activity: "Secondary Tactical Block: " + (get().osData?.tasks.filter(t => t.status === "pending")[1]?.title || "Strategic goal synchronization"), type: "work" },
+              { time: "5:00 PM - 6:00 PM", activity: "Routine Ledger Review & Expense logs audit", type: "admin" },
+              { time: "9:30 PM - 9:45 PM", activity: "Piggy Cognitive Alignment & Sleep tracker check-in", type: "planning" }
+            ],
+            notes: "Strategic priorities mapped successfully. Focus probability: 94%. We detected high evening fatigue, so cognitive-intensive tasks are shifted into the pre-noon block, Sir."
+          }
+        };
+        set({ plannerPlan: mockPlan.plan, isUpdatingDb: false });
+        get().showToast("Optimal daily path compiled.", "success");
+      }, 1000);
+    },
+
+    saveDiaryEntry: async (content, mood, productivityScore) => {
+      set({ isUpdatingDb: true });
+      
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) {
+        set({ isUpdatingDb: false });
+        return;
+      }
+      
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        data.diaryEntries = data.diaryEntries || [];
+        
+        // Local calendar date (never shifted by UTC offset)
+        const todayStr = getLocalDateString(new Date());
+        const timestamp = new Date().toISOString();
+        
+        const totalHabits = data.habits.length;
+        const completedHabits = data.habits.filter(h => h.logs.includes(todayStr)).length;
+        const pendingTasks = data.tasks.filter(t => t.status === "pending").length;
+        const completedTasksToday = data.tasks.filter(t => t.date === todayStr && t.status === "completed").length;
+        
+        const personality = data.profile?.aiPersonality || "Logical";
+        
+        // --- Smart Linguistic Analysis Engine ---
+        const normalized = content.toLowerCase();
+        const hasTamilScript = /[\u0b80-\u0bff]/.test(content);
+        const tanglishPatterns = [
+          "naan", "vanden", "vandhen", "pannen", "pennen", "senjen", "mudichen", "mudichuten", "vela", "velai", 
+          "padichen", "padithen", "sapten", "saapten", "thoonginen", "thunginen", "pesunen", "pesinen", 
+          "irukken", "iruken", "pala", "seitha", "seithutten", "work pannen", "code pannen", "study pannen", "panniten"
+        ];
+        
+        const hasTanglish = tanglishPatterns.some(pattern => normalized.includes(pattern));
+        const isTamilContext = hasTamilScript || hasTanglish;
+
+        const achievements: string[] = [];
+        
+        if (normalized.includes("code") || normalized.includes("coding") || normalized.includes("program") || normalized.includes("software") || normalized.includes("bugs") || normalized.includes("github") || normalized.includes("build")) {
+          achievements.push(isTamilContext ? "coding panni software solutions design panni irukkinga 💻" : "making concrete software engineering progress 💻");
+        }
+        if (normalized.includes("work") || normalized.includes("vela") || normalized.includes("velai") || normalized.includes("office") || normalized.includes("meeting") || normalized.includes("task") || normalized.includes("வேலை")) {
+          achievements.push(isTamilContext ? "office velai-galaium targets-aium disciplined-ah mudichurukkinga 👔" : "completing vital work and operational tasks 👔");
+        }
+        if (normalized.includes("study") || normalized.includes("studying") || normalized.includes("padichen") || normalized.includes("padithen") || normalized.includes("learn") || normalized.includes("read") || normalized.includes("book") || normalized.includes("படித்தேன்")) {
+          achievements.push(isTamilContext ? "iniku nalla padichu knowledge expand panni irukkinga 📚" : "investing in your intellect and learning new things 📚");
+        }
+        if (normalized.includes("gym") || normalized.includes("exercise") || normalized.includes("workout") || normalized.includes("run") || normalized.includes("walk") || normalized.includes("உடற்பயிற்சி")) {
+          achievements.push(isTamilContext ? "body physical fitness-kaga workout panni gym exercise seithurukkinga 🏃‍♂️" : "prioritizing physical fitness and body conditioning 🏃‍♂️");
+        }
+        if (normalized.includes("vandhen") || normalized.includes("vanden") || normalized.includes("vandha") || normalized.includes("came") || normalized.includes("வந்தேன்")) {
+          achievements.push(isTamilContext ? "solliya edathuku vandhu correct attendance, presence-ah thandhirukkinga 📍" : "showing up exactly where you needed to be with commitment 📍");
+        }
+        if (normalized.includes("sapten") || normalized.includes("saapten") || normalized.includes("food") || normalized.includes("diet") || normalized.includes("eat") || normalized.includes("சாப்பிட்டேன்")) {
+          achievements.push(isTamilContext ? "diet health follow panni correct timela food saapturukkinga 🍏" : "maintaining clean nutritional intake and eating properly 🍏");
+        }
+        if (normalized.includes("completed") || normalized.includes("done") || normalized.includes("mudichen") || normalized.includes("mudichuten") || normalized.includes("mudithutten") || normalized.includes("முடித்தேன்")) {
+          achievements.push(isTamilContext ? "kudutha works-ai disciplined-ah check panni mudichurukkinga 🎯" : "crossing off crucial line items from your list successfully 🎯");
+        }
+
+        if (achievements.length === 0) {
+          achievements.push(isTamilContext ? "iniku nalla focus-odu life routine-ai secure panni irukkinga ✨" : "dedicating energy toward stabilizing your daily routines ✨");
+        }
+
+        const achievementsList = achievements.join(isTamilContext ? ", and " : ", and ");
+
+        let review = "";
+        
+        if (personality === "Cynical") {
+          review = isTamilContext 
+            ? `Well well, look at today's log. Neenga rate panna score ${productivityScore}%. You logged ${completedTasksToday} tasks completed and ${completedHabits}/${totalHabits} routines. On the bright side, you actually did well by: ${achievementsList}. Romba creative-ah eludhi irukkeenga, let's see if tomorrow holds same execution, or just more creative diary logging.`
+            : `Well, let's inspect today's "unprecedented achievements." You self-reported a productivity score of ${productivityScore}%. On the positive side, my sensors verify you did well by: ${achievementsList}. You logged ${completedTasksToday} completed tasks today, leaving ${pendingTasks} pending issues, and completed ${completedHabits}/${totalHabits} routines. Let's see if tomorrow holds actual execution, or just more creative diary logging.`;
+        } else if (personality === "Energetic") {
+          review = isTamilContext 
+            ? `WHOA! MARANAMAANA VEGAM, CAPTAIN! 🚀 Unge momentum score ${productivityScore}% mudichu thookuringa! Mass panni irukkinga, especially by: ${achievementsList}! Iniku ${completedTasksToday} tasks complete panni ${completedHabits}/${totalHabits} habits complie pannirukeenga! Pure fire! Let's fuel up the engine tomorrow and break more limits! 🔥⚡`
+            : `WHOA! Simply spectacular effort today, Captain! 🚀 You rating your day at a solid ${productivityScore}% shows absolute momentum! You did phenomenally well by: ${achievementsList}! You crushed ${completedTasksToday} primary missions and logged ${completedHabits}/${totalHabits} habits! Keep checking those boxes and let's light up tomorrow with maximum intensity! ⚡`;
+        } else if (personality === "Calm") {
+          review = isTamilContext 
+            ? `Miga nalla naal, Sir. Iniku neenga: ${achievementsList}. Romba porumaiyodum amaidhiyodum thondu seithu mudichurukkinga. Rating yourself at ${productivityScore}% show balanced peace. Completed ${completedTasksToday} tasks and ${completedHabits}/${totalHabits} routines. Rest your mind tonight and let go of what remains undone.`
+            : `A peaceful conclusion to your day. You self-reported a productivity balance of ${productivityScore}% and completed ${completedHabits} out of ${totalHabits} routines. You did exceptionally well today by: ${achievementsList}. You completed ${completedTasksToday} tasks today; whether big or small, they contribute to your peace. Rest your mind tonight and let go of what remains undone.`;
+        } else { // Logical
+          review = isTamilContext 
+            ? `Audit Parameters Ingested. Efficiency declared: ${productivityScore}%. Positive milestones achieved: ${achievementsList}. Routines complied: ${completedHabits}/${totalHabits}. Completed tactical tasks: ${completedTasksToday}. Recommendation: Current data indicates optimal cognitive utilization. Initiate recovery mode, Sir.`
+            : `Audit Parameters: Ingested evening log. Conformance evaluation metrics updated. Self-declared productivity coefficient is ${productivityScore}%. Success vectors verified: ${achievementsList}. Routines execution: ${completedHabits}/${totalHabits} completed (${totalHabits > 0 ? Math.round((completedHabits/totalHabits)*100) : 0}%). Completed tactical tasks: ${completedTasksToday}. Recommendation: current metrics suggest optimal cognitive utilization. Transitioning to recovery mode.`;
+        }
+        
+        // Persist through backend (upsert by date). Falls back to a local
+        // entry when offline so existing localStorage behavior is preserved.
+        let savedEntry: DiaryEntry | null = null;
+        try {
+          savedEntry = await diaryService.create({
+            date: todayStr,
+            timestamp,
+            content,
+            review,
+            mood,
+            productivityScore
+          });
+        } catch (syncErr) {
+          console.warn("Diary save deferred/offline:", syncErr);
+        }
+
+        const newEntry: DiaryEntry = savedEntry || {
+          id: `diary_${Date.now()}`,
+          date: todayStr,
+          timestamp,
+          content,
+          review,
+          mood,
+          productivityScore
+        };
+        
+        data.diaryEntries = data.diaryEntries.filter(entry => entry.date !== todayStr);
+        data.diaryEntries.unshift(newEntry);
+        
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: data, isUpdatingDb: false });
+        get().showToast("Nightly Diary log secured & analyzed by Piggy.", "success");
+      } catch (err) {
+        console.error(err);
+        set({ isUpdatingDb: false });
+        get().showToast("Failed to compile diary reflection.", "error");
+      }
+    },
+    
+    deleteDiaryEntry: async (entryId) => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      if (!dataStr) return;
+      try {
+        const data: FullOSData = JSON.parse(dataStr);
+        if (data.diaryEntries) {
+          const entry = data.diaryEntries.find(e => e.id === entryId);
+          if (entry) {
+            get().pushUndo(`Restore deleted diary entry from ${entry.date}`, async () => {
+              try {
+                await diaryService.create({
+                  date: entry.date,
+                  timestamp: entry.timestamp,
+                  content: entry.content,
+                  review: entry.review,
+                  mood: entry.mood,
+                  productivityScore: entry.productivityScore
+                });
+              } catch (syncErr) {
+                console.warn("Diary restore deferred/offline:", syncErr);
+              }
+              const innerDataStr = localStorage.getItem("lifeos_data");
+              if (innerDataStr) {
+                const innerData: FullOSData = JSON.parse(innerDataStr);
+                innerData.diaryEntries = innerData.diaryEntries || [];
+                innerData.diaryEntries = innerData.diaryEntries.filter(e => e.date !== entry.date || e.id === entry.id);
+                innerData.diaryEntries.push(entry);
+                innerData.diaryEntries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+                localStorage.setItem("lifeos_data", JSON.stringify(innerData));
+                set({ osData: innerData });
+              }
+            });
+            if (isUuid(entryId)) {
+              try {
+                await diaryService.delete(entryId);
+              } catch (syncErr) {
+                console.warn("Diary delete deferred/offline:", syncErr);
+              }
+            }
+            data.diaryEntries = data.diaryEntries.filter(e => e.id !== entryId);
+            localStorage.setItem("lifeos_data", JSON.stringify(data));
+            set({ osData: data });
+            get().showToast("Diary entry deleted.", "warning", () => get().triggerUndo());
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+  };
+});

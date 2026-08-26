@@ -1,0 +1,148 @@
+// use prisma-next
+// Contract inferred from the live database schema. Edit as needed, then run `prisma contract emit`.
+model User {
+  id        Int         @id(map: "user_pkey") @default(autoincrement())
+  createdAt Timestamptz @default(now())
+  email     String      @unique(map: "user_email_key")
+  name      String?
+  updatedAt Timestamptz
+  username  String?
+  posts     Post[]
+
+  @@map("user")
+}
+
+model Post {
+  id        Int         @id(map: "post_pkey") @default(autoincrement())
+  authorId  Int
+  content   String?
+  createdAt Timestamptz @default(now())
+  title     String
+  updatedAt Timestamptz
+  author    User        @relation(fields:[authorId], references:[id], map: "post_authorId_fkey")
+
+  @@index([authorId], name: "post_authorId_idx")
+  @@map("post")
+}
+
+model Task {
+  id               String       @id(map: "task_pkey")
+  category         String       @default("important-not-urgent")
+  createdAt        Timestamptz  @default(now())
+  date             Timestamptz
+  description      String?
+  endTime          Timestamptz?
+  rescheduledCount Int          @default(0)
+  status           String       @default("pending")
+  title            String
+  updatedAt        Timestamptz
+
+  @@index([date], name: "task_date_idx")
+  @@index([status], name: "task_status_idx")
+  @@map("task")
+}
+
+model Mood {
+  id        String      @id @default(uuid())
+  mood      String
+  score     Int
+  note      String?
+  loggedAt  Timestamptz @default(now())
+  createdAt Timestamptz @default(now())
+  updatedAt Timestamptz
+
+  @@index([loggedAt])
+  @@map("mood")
+}
+
+model Goal {
+  id          String      @id @default(uuid())
+  title       String
+  description String?
+  targetDate  Timestamptz?
+  progress    Int         @default(0)
+  status      String      @default("active")
+  createdAt   Timestamptz @default(now())
+  updatedAt   Timestamptz
+
+  @@index([status], name: "goal_status_idx")
+  @@index([targetDate], name: "goal_target_date_idx")
+  @@map("goal")
+}
+
+model Habit {
+  id               String      @id
+  name             String      @unique(map: "habit_name_key")
+  frequency        String      @default("daily")
+  streak           Int         @default(0)
+  logs             Json        @default("[]")
+  skippedDaysCount Int         @default(0)
+  icon             String?
+  category         String      @default("general")
+  targetValue      Float?
+  unit             String?
+  stepIncrement    Float?
+  dailyProgress    Json        @default("{}")
+  notes            String?
+  createdAt        Timestamptz @default(now())
+  updatedAt        Timestamptz @default(now())
+
+  @@index([name], name: "habit_name_idx")
+  @@index([frequency], name: "habit_frequency_idx")
+  @@map("habit")
+}
+
+model Expense {
+  id              String      @id
+  amount          Decimal
+  category        String
+  description     String?
+  transactionDate Timestamptz
+  paymentMethod   String?
+  isImpulsive     Boolean     @default(false)
+  explanation     String?
+  createdAt       Timestamptz @default(now())
+  updatedAt       Timestamptz @default(now())
+
+  @@index([transactionDate], name: "expense_transactionDate_idx")
+  @@map("expense")
+}
+
+model BudgetAllowance {
+  id          String      @id
+  category    String
+  limitAmount Decimal
+  period      String
+  createdAt   Timestamptz @default(now())
+  updatedAt   Timestamptz @default(now())
+
+  @@map("budget_allowance")
+}
+
+model DiaryEntry {
+  id                String      @id
+  date              Date        @unique(map: "diaryEntry_date_key")
+  timestamp         Timestamptz @default(now())
+  content           String
+  review            String      @default("")
+  mood              String
+  productivityScore Int
+  createdAt         Timestamptz @default(now())
+  updatedAt         Timestamptz @default(now())
+
+  @@map("diaryEntry")
+}
+
+model Notification {
+  id        String      @id
+  type      String      @default("system")
+  title     String
+  message   String
+  read      Boolean     @default(false)
+  dedupeKey String?     @unique(map: "notification_dedupeKey_key")
+  createdAt Timestamptz @default(now())
+
+  @@index([createdAt], name: "notification_created_idx")
+  @@index([read], name: "notification_read_idx")
+  @@map("notification")
+}
