@@ -133,3 +133,4 @@ export interface FullOSData {
   notifications: SystemNotification[];
   diaryEntries?: DiaryEntry[]; // <-- Added Nightly Diary Support!
 }
+

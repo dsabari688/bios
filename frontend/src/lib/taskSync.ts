@@ -169,3 +169,4 @@ export function syncDeleteTask(taskId: string): void {
   if (!isBackendTaskId(taskId)) return;
   void tasksApi.remove(taskId).catch(() => undefined);
 }
+

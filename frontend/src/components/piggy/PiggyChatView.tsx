@@ -507,3 +507,4 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
     </div>
   );
 };
+

@@ -49,3 +49,4 @@ export function remove(id: string): Promise<{ id: string }> {
 }
 
 export const budgetsApi = { getAll, getById, create, update, remove };
+

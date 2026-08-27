@@ -123,3 +123,4 @@ export const SmartPlannerModal: React.FC<SmartPlannerModalProps> = ({
     </div>
   );
 };
+

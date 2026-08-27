@@ -40,3 +40,4 @@ export const notificationService = {
     return notificationsApi.markRead(id);
   },
 };
+

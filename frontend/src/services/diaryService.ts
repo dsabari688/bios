@@ -25,3 +25,4 @@ export const diaryService = {
     return diaryApi.delete(id);
   }
 };
+

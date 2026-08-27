@@ -1168,7 +1168,7 @@ export const useStore = create<StoreState>((set, get) => {
       get().showToast("Chat history cleared.", "info");
     },
 
-    executeBridgeTool: async (toolName, args) => {
+    executeBridgeTool: async (toolName: string, args: any) => {
       const dataStr = localStorage.getItem("lifeos_data");
       const currentData = dataStr ? JSON.parse(dataStr) : get().osData || {};
       
@@ -1766,3 +1766,4 @@ export const useStore = create<StoreState>((set, get) => {
     },
   };
 });
+

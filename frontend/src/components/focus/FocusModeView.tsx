@@ -327,3 +327,4 @@ export const FocusModeView: React.FC<FocusModeViewProps> = ({
     </div>
   );
 };
+

@@ -50,3 +50,4 @@ export const budgetService = {
     return budgetsApi.remove(id);
   },
 };
+

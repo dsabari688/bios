@@ -28,3 +28,4 @@ export const expenseService = {
     return expensesApi.delete(id);
   },
 };
+

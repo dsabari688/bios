@@ -337,3 +337,4 @@ export const GoalsView: React.FC<GoalsViewProps> = ({ goals, onAddGoal, onDelete
     </div>
   );
 };
+

@@ -66,3 +66,4 @@ export const syncService = {
     return syncApi.getStatus();
   },
 };
+

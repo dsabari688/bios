@@ -465,3 +465,4 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     </div>
   );
 };
+

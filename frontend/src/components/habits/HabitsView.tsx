@@ -802,3 +802,4 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
     </div>
   );
 };
+

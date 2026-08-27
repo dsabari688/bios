@@ -24,3 +24,4 @@ const FocusScoreCard: React.FC<Props> = ({ score }) => {
 };
 
 export default FocusScoreCard;
+

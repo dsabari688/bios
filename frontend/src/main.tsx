@@ -21,3 +21,4 @@ if ("serviceWorker" in navigator) {
       .catch((err) => console.error("[PWA] Service Worker registration failed:", err));
   });
 }
+

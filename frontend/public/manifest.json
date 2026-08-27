@@ -1,7 +1,7 @@
 {
-  "name": "LifeOS - Personal Command Cockpit",
-  "short_name": "LifeOS",
-  "description": "Personal command cockpit for tasks, habits, goals, expenses and reflections.",
+  "name": "BIOS - Personal Command Cockpit",
+  "short_name": "BIOS",
+  "description": "BIOS personal command cockpit for tasks, habits, goals, expenses and reflections.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

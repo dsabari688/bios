@@ -52,3 +52,4 @@ export async function deleteGoal(
     headers: authHeader(token),
   });
 }
+

@@ -156,3 +156,4 @@ export const UniversalDateNavigator: React.FC<UniversalDateNavigatorProps> = ({
     </div>
   );
 };
+

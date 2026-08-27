@@ -119,3 +119,4 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ isOpen, onClose,
     </div>
   );
 };
+

@@ -884,3 +884,4 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
     </div>
   );
 };
+

@@ -142,6 +142,10 @@ export default function App() {
   });
 
   useEffect(() => {
+    document.title = "bios";
+  }, []);
+
+  useEffect(() => {
     if (theme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
@@ -286,7 +290,7 @@ export default function App() {
 
           <div className="space-y-2">
             <h1 className="font-display font-extrabold text-3xl tracking-widest text-amber-500 uppercase glow-text-amber">
-              LIFE OS
+              BIOS
             </h1>
             <p className="text-slate-500 font-mono text-[10px] tracking-widest">PERSONAL COMMAND COCKPIT</p>
           </div>
@@ -695,7 +699,7 @@ export default function App() {
 
               {/* Interactive Module Info Indicator bottom */}
               <div className="absolute bottom-6 max-w-md w-full px-6 text-center text-slate-500 font-mono text-[8px] sm:text-[9px] tracking-wider uppercase">
-                Life OS Orbit Navigation &bull; Select elements for direct parameters routing
+                BIOS Orbit Navigation &bull; Select elements for direct parameters routing
               </div>
             </motion.div>
           )}
@@ -721,7 +725,7 @@ export default function App() {
                   <Zap className="w-4 h-4 text-slate-950 fill-slate-950" />
                 </div>
                 <span className="font-display font-black text-sm tracking-widest text-amber-500 dark:text-amber-400 uppercase shrink-0 glow-text-amber">
-                  Life OS
+                  BIOS
                 </span>
                 <span className="font-mono text-[9px] text-slate-400 dark:text-slate-500 hidden sm:inline ml-1 uppercase">
                   v4.3.0
@@ -1051,3 +1055,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
