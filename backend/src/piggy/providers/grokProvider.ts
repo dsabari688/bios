@@ -9,6 +9,10 @@ import {
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.GROK_TIMEOUT_MS ?? process.env.XAI_TIMEOUT_MS ?? 60000);
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class GrokProvider implements AIProvider {
   readonly provider = "grok";
 
@@ -41,7 +45,7 @@ export class GrokProvider implements AIProvider {
         return trimmed;
       }
     }
-    return isGroqKey ? "qwen/qwen3.6-27b" : "grok-2-latest";
+    return isGroqKey ? "groq/compound-mini" : "grok-2-latest";
   }
 
   get isConfigured(): boolean {
@@ -52,14 +56,12 @@ export class GrokProvider implements AIProvider {
     return this.isConfigured;
   }
 
-  async generate(options: GenerateOptions): Promise<string> {
+  async generate(options: GenerateOptions, retries = options.maxRetries ?? (options.fastChat ? 1 : 3)): Promise<string> {
     if (!this.isConfigured) {
-      throw new AiUnavailableError("Grok API key is not configured. Set XAI_API_KEY in .env");
+      throw new AiUnavailableError("Grok/Groq API key is not configured. Set XAI_API_KEY in .env");
     }
 
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutMs = options.timeoutMs ?? (options.fastChat ? 8000 : DEFAULT_TIMEOUT_MS);
 
     const messages: { role: string; content: string }[] = [];
     if (options.system) {
@@ -77,51 +79,77 @@ export class GrokProvider implements AIProvider {
       payload.response_format = { type: "json_object" };
     }
 
-    try {
-      const url = `${this.baseUrl}/chat/completions`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        if (res.status === 429) {
-          const retryMatch = detail.match(/try again in ([\d.]+)s/i);
-          const retryMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1]) * 1000) : 10000;
-          throw new RateLimitError(retryMs);
+      try {
+        const url = `${this.baseUrl}/chat/completions`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          if (res.status === 429) {
+            const retryMatch = detail.match(/try again in ([\d.]+)s/i);
+            const retryMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1]) * 1000) : 1000;
+
+            if (attempt < retries) {
+              const backoffMs = options.fastChat
+                ? 500
+                : Math.min(Math.max(retryMs, 1000 * (attempt + 1)), 3000);
+              console.warn(
+                `[PIGGY][AI] Rate limit 429 on ${this.model}. Retrying in ${backoffMs}ms (attempt ${attempt + 1}/${retries})...`,
+              );
+              await delay(backoffMs);
+              continue;
+            }
+
+            throw new RateLimitError(retryMs);
+          }
+          throw new Error(
+            `AI API responded ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`
+          );
         }
-        throw new Error(
-          `Grok API responded ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`
-        );
-      }
 
-      const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
+        const data = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
 
-      return data.choices?.[0]?.message?.content ?? "";
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new AiTimeoutError(timeoutMs);
+        return data.choices?.[0]?.message?.content ?? "";
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new AiTimeoutError(timeoutMs);
+        }
+        if (
+          error instanceof TypeError &&
+          (error.message.includes("fetch failed") ||
+            error.message.includes("ECONNREFUSED") ||
+            error.message.includes("ENOTFOUND"))
+        ) {
+          throw new AiUnavailableError("AI API network error");
+        }
+        if (error instanceof RateLimitError) {
+          throw error;
+        }
+        if (attempt < retries) {
+          await delay(1000 * (attempt + 1));
+          continue;
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
       }
-      if (
-        error instanceof TypeError &&
-        (error.message.includes("fetch failed") ||
-          error.message.includes("ECONNREFUSED") ||
-          error.message.includes("ENOTFOUND"))
-      ) {
-        throw new AiUnavailableError("Grok API network error");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
     }
+
+    throw new RateLimitError(5000);
   }
 
   async generateStructured<T>(options: GenerateOptions): Promise<T> {
@@ -153,7 +181,7 @@ function parseJsonLoose<T>(raw: string): T {
       return JSON.parse(trimmed.slice(start, end + 1)) as T;
     }
 
-    throw new Error("Grok model did not return valid JSON");
+    throw new Error("Grok/Groq model did not return valid JSON");
   }
 }
 

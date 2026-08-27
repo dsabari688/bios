@@ -12,6 +12,14 @@ export interface UserProfile {
   dailyReviewTime?: string;
   learnedPatterns?: string[];
   activationWord?: string;
+  taskReminders?: boolean;
+  habitNudges?: boolean;
+  goalMilestones?: boolean;
+  missedAlerts?: boolean;
+  biometrics?: boolean;
+  faceUnlock?: boolean;
+  darkMode?: boolean;
+  highContrast?: boolean;
 }
 
 export type TaskPriority = 'urgent-important' | 'important-not-urgent' | 'urgent-not-important' | 'not-urgent-not-important';

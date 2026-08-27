@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle } from "lucide-react";
 import { useStore } from "../../store/useStore";
 
@@ -24,6 +24,14 @@ interface SettingsViewProps {
     dailyReviewTime?: string;
     learnedPatterns?: string[];
     activationWord?: string;
+    taskReminders?: boolean;
+    habitNudges?: boolean;
+    goalMilestones?: boolean;
+    missedAlerts?: boolean;
+    biometrics?: boolean;
+    faceUnlock?: boolean;
+    darkMode?: boolean;
+    highContrast?: boolean;
   }) => void;
 }
 
@@ -34,7 +42,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onSaveProfile
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
-  const { token, showToast } = useStore();
+  const { token, showToast, systemConfig } = useStore();
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [importData, setImportData] = useState<any>(null);
 
@@ -140,6 +148,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     highContrast: false
   });
 
+  // Sync toggle states from backend config / initialProfile when loaded
+  useEffect(() => {
+    if (initialProfile) {
+      if (initialProfile.name) setName(initialProfile.name);
+      if (initialProfile.email) setEmail(initialProfile.email);
+      if (initialProfile.aiPersonality) setPersonality(initialProfile.aiPersonality);
+      if (initialProfile.activationWord) setActivationWord(initialProfile.activationWord);
+      if (initialProfile.listeningMode) setListeningMode(initialProfile.listeningMode);
+      if (initialProfile.proactiveModeEnabled !== undefined) setProactiveEnabled(initialProfile.proactiveModeEnabled);
+      if (initialProfile.maxProactiveNudges !== undefined) setMaxNudges(initialProfile.maxProactiveNudges);
+      if (initialProfile.dailyReviewTime) setReviewTime(initialProfile.dailyReviewTime);
+      if (initialProfile.learnedPatterns?.length) setPatterns(initialProfile.learnedPatterns);
+    }
+
+    const sourceConfig = systemConfig || initialProfile;
+    if (sourceConfig) {
+      setToggles({
+        proactiveSuggestions: sourceConfig.proactiveModeEnabled ?? true,
+        dailyBriefing: true,
+        taskReminders: (sourceConfig as any).taskReminders ?? true,
+        habitNudges: (sourceConfig as any).habitNudges ?? true,
+        goalMilestones: (sourceConfig as any).goalMilestones ?? true,
+        missedAlerts: (sourceConfig as any).missedAlerts ?? false,
+        biometrics: (sourceConfig as any).biometrics ?? true,
+        faceUnlock: (sourceConfig as any).faceUnlock ?? false,
+        darkMode: (sourceConfig as any).darkMode ?? false,
+        highContrast: (sourceConfig as any).highContrast ?? false,
+      });
+
+      if ((sourceConfig as any).darkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+  }, [systemConfig, initialProfile]);
+
   const handleToggle = (key: string) => {
     setToggles(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -172,7 +217,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       maxProactiveNudges: maxNudges,
       dailyReviewTime: reviewTime,
       learnedPatterns: patterns,
-      activationWord
+      activationWord,
+      taskReminders: toggles.taskReminders,
+      habitNudges: toggles.habitNudges,
+      goalMilestones: toggles.goalMilestones,
+      missedAlerts: toggles.missedAlerts,
+      biometrics: toggles.biometrics,
+      faceUnlock: toggles.faceUnlock,
+      darkMode: toggles.darkMode,
+      highContrast: toggles.highContrast,
     });
     showToast("Sir, personal parameters and brain mapping successfully committed to database layers.", "success");
   };

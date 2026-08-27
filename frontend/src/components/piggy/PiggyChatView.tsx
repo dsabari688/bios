@@ -12,12 +12,12 @@ interface PiggyChatViewProps {
 }
 
 const SHORTCUT_CHIPS = [
-  "Recall Context",
-  "Create Task",
-  "Show Streak",
-  "Plan Tomorrow",
-  "Motivate Me",
-  "Productivity Review"
+  "What are my tasks?",
+  "Create a task",
+  "Show my habits",
+  "Plan tomorrow",
+  "Motivate me",
+  "Weekly review"
 ];
 
 export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
@@ -26,7 +26,7 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
   isLoading,
   token
 }) => {
-  const { showToast, osData, saveProfile } = useStore();
+  const { showToast, osData, saveProfile, clearChatHistory } = useStore();
   // 👇 THE MAGIC LINK: Uses global data if it exists, falls back to local if not
   const activeHistory = osData?.chatHistory || chatHistory; 
   const activationWord = (osData?.profile?.activationWord || "piggy").toLowerCase();
@@ -55,7 +55,7 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
         })
         .catch(err => console.error("Error fetching memory facts count:", err));
     }
-  }, [token, activeHistory]);
+  }, [token]);
 
   const isWakeWordModeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
@@ -145,17 +145,9 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
     if (isLoading) return;
     
     if (window.speechSynthesis) window.speechSynthesis.cancel();
-    let formulation = `Sir, please compile the following report: ${chip}.`;
-    const capitalizedWord = activationWord.charAt(0).toUpperCase() + activationWord.slice(1);
-    if (chip === "Recall Context") formulation = `${capitalizedWord}, what do you remember about my current preferences, goals, and deadlines?`;
-    if (chip === "Create Task") formulation = "Sir, let's designate a new core task: Refactor cache protocols.";
-    if (chip === "Show Streak") formulation = "Check my current habit progress structure.";
-    if (chip === "Plan Tomorrow") formulation = "Plan tomorrow's tactical timeline schedule.";
-    if (chip === "Motivate Me") formulation = `Speak an existential motivation quote, ${capitalizedWord}.`;
-    if (chip === "Productivity Review") formulation = "Conduct an outcome forecast audit on My Goal Vault objectives.";
-
+    // Use chips as-is — they're already natural language
     setPiggyState("THINKING");
-    await handleSendMessage(formulation);
+    await handleSendMessage(chip);
   };
 
   useEffect(() => {
@@ -378,13 +370,13 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
                   : "border-white/15 hover:bg-white/5 text-white"
               }`}
             >
-              {isWakeWordMode ? "Wake Word: ACTIVE" : "Enable Wake Word"}
+              {isWakeWordMode ? "Wake Word: ON" : "Enable Wake Word"}
             </button>
             <button
               onClick={requestMicAndStart}
               className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer"
             >
-              Dictate Protocol
+              Voice Input
             </button>
           </div>
 
@@ -442,9 +434,18 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
         <div className="flex items-center justify-between pb-4 border-b border-slate-50">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-display font-bold text-slate-800 text-sm">Synchronized Cognitive Uplink</span>
+            <span className="font-display font-bold text-slate-800 text-sm">Chat with Piggy</span>
           </div>
-          <span className="font-mono text-[9px] font-bold text-emerald-600">● SECURE UPLINK ACTIVE</span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => clearChatHistory()}
+              className="text-[10px] font-mono text-slate-400 hover:text-rose-500 px-2 py-0.5 rounded border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer"
+            >
+              Clear Chat
+            </button>
+            <span className="font-mono text-[9px] font-bold text-emerald-600">● Online</span>
+          </div>
         </div>
 
         {/* Scroll message core area */}
@@ -473,7 +474,7 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
           {isLoading && (
             <div className="flex items-center gap-2 text-slate-400 font-mono text-[10px]">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-              <span>Piggy is parsing cognitive vectors...</span>
+              <span>Thinking...</span>
             </div>
           )}
           
@@ -488,7 +489,7 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
             disabled={isLoading}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Command input parameters..."
+            placeholder="Type a message..."
             className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
           />
           <button

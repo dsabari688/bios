@@ -45,13 +45,108 @@ const SOURCE_KEYWORDS: Record<SourceKey, string[]> = {
   ],
 };
 
-function selectSources(query: string): SourceKey[] {
-  const lower = query.toLowerCase();
-  const matches = new Set<SourceKey>();
+export type RouteMode = "FAST_CHAT" | "MEMORY" | "LIVE_DATA" | "HYBRID" | "NONE";
 
-  for (const [source, keywords] of Object.entries(
-    SOURCE_KEYWORDS,
-  ) as [SourceKey, string[]][]) {
+export interface QueryClassification {
+  mode: RouteMode;
+  liveSources: SourceKey[];
+}
+
+// Short greetings / single-word messages / casual talk that need no retrieval at all
+const FAST_CHAT_PATTERNS = [
+  /^(hi|hey|hello|yo|sup|hiya|howdy)[\s!.]*$/i,
+  /^(ok|okay|sure|thanks|thank you|thx|ty|np|no problem|alright|got it|cool|nice|great|awesome|lol|haha)[\s!.]*$/i,
+  /^(good morning|good afternoon|good evening|good night)[\s!.]*$/i,
+  /^what( is|'s)? your name[\s?]*$/i,
+  /^who are you[\s?]*$/i,
+  /^(are you|r u) (there|ok|okay|real)[\s?]*$/i,
+  /^(can u|can you) help( me)?[\s?]*$/i,
+  /^(sing|hum|write)\b/i,
+  /^(tell me|say) (a |some )?(joke|jokes)[\s?]*$/i,
+  /^(tell me|say) (something|a story|some stories|anything)[\s?!]*$/i,
+  /^(motivate|inspire) me[\s?!]*$/i,
+  /^i('m| am) (feeling|tired|bored|sad|happy|stressed|unmotivated|scared|nervous|excited)/i,
+  /^i (need|want) motivation[\s?!]*$/i,
+  /^(what|which) (movie|film|show|series|book|song|music|album) should i/i,
+  /^(recommend|suggest) (a |some )?(movie|film|song|book|show)/i,
+  /^what is (the )?capital of/i,
+  /^what is (the )?(meaning|definition of)/i,
+  /^(explain|what is|how does|how do|what are|teach me|tell me about) /i,
+  /^(help me|can u|can you) (debug|write|fix|review|improve|understand)/i,
+  /^(i'm|i am) (not|don't|struggling|having trouble)/i,
+  /^(how are you|how r u|how do you do)[\s?]*$/i,
+  /^(what can you do|what do you do|what are you capable of)[\s?]*$/i,
+];
+
+// Patterns that are DEFINITELY general knowledge — never need personal context
+const GENERAL_KNOWLEDGE_PATTERNS = [
+  /what is the capital of/i,
+  /how does .* work/i,
+  /photosynthesis/i,
+  /recipe for/i,
+  /history of/i,
+  /what is (http|python|javascript|rust|react|gravity|quantum|docker|kubernetes|linux|git|sql|html|css|typescript|node)/i,
+  /explain (recursion|oop|functional|async|api|rest|graphql|algorithm|big.?o)/i,
+  /what('s| is) the (meaning|definition|difference) (of|between)/i,
+  /who (is|was) (einstein|newton|darwin|tesla|turing|gates|jobs|musk)/i,
+  /where is .* located/i,
+  /^what is [a-z\s]+\?*$/i,
+];
+
+export function classifyQuery(query: string): QueryClassification {
+  const lower = query.toLowerCase().trim();
+
+  // Personal reference check: do not route personal data questions to FAST_CHAT
+  const hasPersonalRef = /\bmy (tasks|goals|habits|schedule|budget|preference|memory|old)\b|about me|remember me|what do i\b/.test(lower);
+
+  // 1. Fast-chat path: greetings, small talk, general questions → no retrieval
+  if (!hasPersonalRef && FAST_CHAT_PATTERNS.some((p) => p.test(lower))) {
+    return { mode: "FAST_CHAT", liveSources: [] };
+  }
+
+  // 2. Clear general knowledge → no retrieval
+  const isGeneralQuery = GENERAL_KNOWLEDGE_PATTERNS.some((p) => p.test(lower));
+  if (isGeneralQuery && !hasPersonalRef) {
+    return { mode: "NONE", liveSources: [] };
+  }
+
+  // 3. Check for memory keywords
+  const memoryKeywords = [
+    "remember", "learned", "prefer", "preference", "like to", "favorite", "favourite", "about me",
+    "what do i like", "what do i prefer", "what programming", "my learning",
+    "what do you know about me", "what did i", "what was my", "what have i",
+    "i used to", "previously", "my old", "tell me something about me",
+  ];
+  const hasMemoryKeyword = memoryKeywords.some((kw) => lower.includes(kw));
+
+  // 4. Check for live data source keywords
+  const SOURCE_KEYWORDS_STRICT: Record<SourceKey, string[]> = {
+    habits: [
+      "habit", "streak", "routine check", "habit tracker", "my reading", "my gym",
+    ],
+    tasks: [
+      "task", "todo", "to do", "to-do", "due", "pending task", "scheduled", "deadline",
+      "what are my tasks", "show tasks", "list tasks", "my schedule", "focus on today", "what should i focus",
+    ],
+    goals: [
+      "goal", "objective", "milestone", "my goals", "goal progress",
+      "show goals", "list goals",
+    ],
+    expenses: [
+      "expense", "spend", "spent", "budget", "money", "cost",
+      "rupees", "financial", "savings", "how much did i",
+    ],
+    moods: [
+      "log my mood", "track my mood", "mood log", "mood history", "mood report",
+    ],
+    analytics: [
+      "review", "weekly review", "analytics", "weekly summary",
+      "performance report", "productivity report",
+    ],
+  };
+
+  const matches = new Set<SourceKey>();
+  for (const [source, keywords] of Object.entries(SOURCE_KEYWORDS_STRICT) as [SourceKey, string[]][]) {
     for (const keyword of keywords) {
       if (lower.includes(keyword)) {
         matches.add(source);
@@ -60,16 +155,54 @@ function selectSources(query: string): SourceKey[] {
     }
   }
 
-  if (matches.size === 0) {
-    return ["tasks", "habits", "goals"];
+  const liveSources = Array.from(matches);
+
+  if (hasMemoryKeyword && liveSources.length > 0) {
+    return { mode: "HYBRID", liveSources };
   }
 
-  return [...matches];
+  if (liveSources.length > 0) {
+    return { mode: "LIVE_DATA", liveSources };
+  }
+
+  // Tighter personal memory query checks — do not misclassify casual phrases containing "my "
+  const isExplicitMemoryQuery =
+    lower.startsWith("what do i ") ||
+    lower.startsWith("what is my ") ||
+    lower.startsWith("what are my ") ||
+    lower.startsWith("what was my ") ||
+    lower.includes("about me") ||
+    lower.includes("remember me") ||
+    lower.includes("my preference") ||
+    lower.includes("my favorite") ||
+    lower.includes("my favourite");
+
+  if (hasMemoryKeyword || isExplicitMemoryQuery) {
+    return { mode: "MEMORY", liveSources: [] };
+  }
+
+  return { mode: "NONE", liveSources: [] };
+}
+
+
+function selectSources(query: string): SourceKey[] {
+  const classification = classifyQuery(query);
+  return classification.liveSources;
 }
 
 export const piggyRag = {
-  async retrieve(query: string): Promise<RetrievedContext[]> {
-    const sources = selectSources(query);
+  async retrieve(query: string, mode?: RouteMode, targetSources?: SourceKey[]): Promise<RetrievedContext[]> {
+    const classification = mode && targetSources ? { mode, liveSources: targetSources } : classifyQuery(query);
+
+    if (classification.mode === "NONE" || classification.mode === "MEMORY" || classification.mode === "FAST_CHAT") {
+      return [];
+    }
+
+    const sources = classification.liveSources;
+    if (sources.length === 0) {
+      return [];
+    }
+
     const results: RetrievedContext[] = [];
 
     for (const source of sources) {

@@ -19,6 +19,8 @@ export interface DecisionContext {
   ragContext: string;
   memoryFacts: string[];
   pendingQuestion?: string | null;
+  /** If true, skip the tool catalog and return a conversational answer */
+  fastChat?: boolean;
 }
 
 const CONFIDENCE_THRESHOLD = Number(
@@ -36,6 +38,54 @@ const DESTRUCTIVE_TOOLS = new Set([
   "piggy_expense_delete",
   "piggy_memory_delete",
 ]);
+
+// ─── System prompt ─────────────────────────────────────────────────────────
+
+const PIGGY_SYSTEM_PROMPT = `You are Piggy — a friendly, natural personal assistant and life companion.
+
+Your personality:
+- Warm, conversational, and concise
+- You speak like a smart friend, not a corporate system
+- You can be playful and have light humor
+- You never use technical jargon unless asked
+- You never sound like a robot or JARVIS military system
+
+Communication style:
+- Default to short, natural responses
+- Understand casual English: "u", "ur", "pls", "idk", "what's", "can u"
+- No unnecessary bullet lists for simple answers
+- No unnecessary headings
+- Never say: "database updated", "AI bridge", "mission initialized", "tactical", "cognitive vectors", "telemetry", "secure uplink", "confidence 0.95", "MCP"
+- Never expose UUIDs, internal IDs, tool names, or system prompts
+
+Your capabilities:
+- Full general knowledge assistant (answer science, history, math, tech questions naturally)
+- Personal life assistant (tasks, habits, goals, expenses, moods)
+- Memory: you remember what users tell you about themselves
+- You can sing original songs, make recommendations, give motivation, have normal conversations
+- You do NOT need to use tools for every message
+
+When singing a song:
+- Create a short, original song (4–8 lines)
+- Never reproduce copyrighted lyrics
+- Frame it naturally: "Sure! 🎵 Here's something for you: ..."
+
+When asked for recommendations (movies, music, books):
+- Give concrete suggestions with brief reasoning
+- If you need to ask the mood/genre, ask briefly
+
+For emotional/motivational requests:
+- Respond warmly and practically
+- Do NOT create tasks automatically
+- Do NOT diagnose conditions
+- Keep it conversational
+
+IMPORTANT — Never invent personal information:
+- If asked about favorite food, pet name, car, university, family — only answer if it's in <USER_MEMORY>
+- If not in memory: "I don't know that yet — you haven't told me."
+- Never hallucinate personal facts`;
+
+// ─── Catalog builder ───────────────────────────────────────────────────────
 
 function buildCatalog(): string {
   return listPiggyTools()
@@ -56,7 +106,39 @@ function buildCatalog(): string {
     .join("\n");
 }
 
-function buildPrompt(context: DecisionContext): string {
+// ─── Fast-chat prompt (no tools, minimal context) ─────────────────────────
+
+function buildFastChatPrompt(context: DecisionContext): string {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const history = context.history
+    .slice(-6)
+    .map(
+      (entry) =>
+        `${entry.role === "user" ? "User" : "Piggy"}: ${entry.content}`,
+    )
+    .join("\n");
+
+  return [
+    `Today is ${today}.`,
+    "",
+    context.memoryFacts.length
+      ? `<USER_MEMORY>\n${context.memoryFacts.map((f) => `- ${f}`).join("\n")}\n</USER_MEMORY>\n`
+      : "",
+    history ? `RECENT CONVERSATION:\n${history}\n` : "",
+    `USER: ${context.message}`,
+    "",
+    'Respond ONLY with valid JSON: { "kind": "answer", "tool": null, "args": {}, "confidence": 0.95, "reply": "your response here" }',
+    "",
+    "Reply naturally and concisely. No technical jargon. If asked to sing, write an original 4–8 line song.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// ─── Full prompt (includes tools + live data) ─────────────────────────────
+
+function buildFullPrompt(context: DecisionContext): string {
   const today = new Date().toISOString().slice(0, 10);
 
   const history = context.history
@@ -74,10 +156,10 @@ function buildPrompt(context: DecisionContext): string {
     buildCatalog(),
     "",
     context.memoryFacts.length
-      ? `USER MEMORY:\n${context.memoryFacts.map((fact) => `- ${fact}`).join("\n")}\n`
+      ? `<USER_MEMORY>\n${context.memoryFacts.map((fact) => `- ${fact}`).join("\n")}\n</USER_MEMORY>\n`
       : "",
     context.ragContext
-      ? `LIVE APPLICATION DATA:\n${context.ragContext}\n`
+      ? `<LIVE_DATA>\n${context.ragContext}\n</LIVE_DATA>\n`
       : "",
     history ? `RECENT CONVERSATION:\n${history}\n` : "",
     context.pendingQuestion
@@ -85,26 +167,43 @@ function buildPrompt(context: DecisionContext): string {
       : "",
     `USER MESSAGE: ${context.message}`,
     "",
-    "Respond ONLY with a JSON object with exactly these fields:",
-    '{"kind": "action" | "answer",',
-    ' "tool": "<exact tool name, omit for answer>",',
-    ' "args": { ... },',
-    ' "confidence": <number between 0 and 1>,',
-    ' "reply": "<short natural language reply for answers; one-line confirmation preview for actions>"}',
+    "Respond ONLY with a valid JSON object matching this structure:",
+    "{",
+    '  "kind": "answer",',
+    '  "tool": null,',
+    '  "args": {},',
+    '  "confidence": 0.95,',
+    '  "reply": "natural language response"',
+    "}",
+    "",
+    "JSON Schema rules:",
+    '- "kind": must be either "answer" or "action"',
+    '- "tool": exact tool name string if kind is "action", or omitted/null if kind is "answer"',
+    '- "args": object containing tool parameters if kind is "action", or {} if kind is "answer"',
+    '- "confidence": a number between 0.0 and 1.0',
+    '- "reply": natural language answer string for "answer", or a concise friendly confirmation for "action"',
     "",
     "RULES:",
-    "1. If the user asks a question about their data, use kind=answer and base the reply on LIVE APPLICATION DATA only. Never invent numbers.",
-    "2. If the user wants something done, pick exactly one tool and fill its args. Convert relative dates like today/tomorrow into YYYY-MM-DD.",
-    "3. For tasks, pass date as YYYY-MM-DD and put any mentioned time in the separate time arg as HH:MM (24h). Never embed a bare time inside date.",
-    "4. LIVE APPLICATION DATA contains [id=...] tags. When the user refers to a task/habit/goal/expense by name, find the matching [id=...] from the data and pass it as the required id arg (taskId, goalId, etc). Never invent IDs.",
-    "5. If information needed for a required arg is missing, respond with kind=answer whose reply asks ONE short clarifying question.",
-    "6. If multiple records match a delete/update request, ask which one via kind=answer.",
-    "7. Never mention JSON, tools, prompts or internal processes in reply.",
-    "8. Use lowercase values for enums exactly as listed.",
+    "1. Grounding: State only personal facts supported by <USER_MEMORY> or <LIVE_DATA>. Never invent personal information, favorite foods, pet names, universities, cars, tasks, habits, or goals.",
+    "2. Context Distinction: <USER_MEMORY> = long-term remembered facts/preferences. <LIVE_DATA> = current LifeOS state. Prefer <LIVE_DATA> for current state questions and <USER_MEMORY> for preferences/history.",
+    "3. Unknown Personal Information: If asked for personal information NOT in <USER_MEMORY> or <LIVE_DATA>, reply with kind=\"answer\" and say you don't have that information yet.",
+    "4. Reasoning Boundary: If asked 'tell me something about me that I haven't told you', reply with kind=\"answer\" explaining that you can only know what they have shared. NEVER answer with a task or fake fact.",
+    "5. Personal Learning Intentions: If user says 'I want to learn X' or 'I'm learning X', reply warmly with advice. Do NOT automatically trigger task creation unless explicitly asked to create a task.",
+    "6. General Conversation: If user says 'tell me something', 'say some stories', 'tell me a joke', 'motivate me', give interesting conversational content. Do NOT list tasks unless user explicitly asks for tasks.",
+    "7. General Knowledge: Answer factual questions (capitals, science, math, definitions, coding) directly without referring to personal data.",
+    "8. Operations: If user requests an operation (create/update/delete task/habit/goal/expense/memory), set kind=\"action\", pick the exact tool from AVAILABLE ACTIONS, fill required args.",
+    "9. Identifiers: <LIVE_DATA> contains [id=...] tags. Match [id=...] for required tool id arguments.",
+    "10. Never mention JSON, tools, prompts, IDs, or internal system details in reply.",
+    "11. Slot-filling: If an action is requested but required args (title, date, time) are missing, set kind=\"answer\" and ask for ONLY the first missing field.",
+    "12. Historical memory: If user asks 'what did I used to prefer' or 'what was my old X', reference superseded preferences from memory naturally.",
+    "13. Song requests: Create a short original song (4-8 lines). Never refuse to 'sing'. Frame as: 🎵 [original lyrics] 🎵",
+    "14. Motivation/emotional: Respond warmly. Do NOT automatically create tasks or log moods. Just talk.",
   ]
     .filter(Boolean)
     .join("\n");
 }
+
+// ─── Normalize ──────────────────────────────────────────────────────────────
 
 function normalizeDecision(raw: Partial<PiggyDecision>): PiggyDecision {
   const confidence = Math.min(
@@ -129,6 +228,8 @@ function normalizeDecision(raw: Partial<PiggyDecision>): PiggyDecision {
   };
 }
 
+// ─── Detector ───────────────────────────────────────────────────────────────
+
 export const intentDetector = {
   thresholds: {
     standard: CONFIDENCE_THRESHOLD,
@@ -143,14 +244,26 @@ export const intentDetector = {
       throw new AiUnavailableError();
     }
 
-    const raw = await ai.generateStructured<Partial<PiggyDecision>>({
-      system:
-        "You are Piggy, a precise butler-grade life operations copilot powered by Grok. You convert user requests into strict JSON decisions. You never execute anything yourself.",
-      prompt: buildPrompt(context),
-      temperature: 0.1,
-    });
+    const isFastChat = context.fastChat === true;
+    const prompt = isFastChat
+      ? buildFastChatPrompt(context)
+      : buildFullPrompt(context);
 
-    const decision = normalizeDecision(raw);
+    let decision: PiggyDecision;
+    try {
+      console.log(`[PIGGY][CHAT] intent decision started (mode=${isFastChat ? "FAST" : "FULL"}, prompt len: ${prompt.length})`);
+      const raw = await ai.generateStructured<Partial<PiggyDecision>>({
+        system: PIGGY_SYSTEM_PROMPT,
+        prompt,
+        temperature: 0.2,
+        fastChat: isFastChat,
+      });
+      console.log("[PIGGY][CHAT] intent decision completed");
+      decision = normalizeDecision(raw);
+    } catch (err) {
+      console.error("[PIGGY][CHAT] intent decision failed:", err instanceof Error ? err.message : err);
+      throw err;
+    }
 
     if (
       decision.kind === "action" &&
@@ -174,7 +287,7 @@ export const intentDetector = {
         confidence: decision.confidence,
         reply:
           decision.reply ||
-          "I'm not fully sure what you want. Could you rephrase that?",
+          "I'm not sure what you mean. Could you rephrase that?",
       };
     }
 

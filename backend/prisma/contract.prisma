@@ -146,3 +146,12 @@ model Notification {
   @@index([read], name: "notification_read_idx")
   @@map("notification")
 }
+
+model SystemConfig {
+  id        String      @id @default("default")
+  config    Json        @default("{}")
+  createdAt Timestamptz @default(now()) @map("created_at")
+  updatedAt Timestamptz @default(now()) @map("updated_at")
+
+  @@map("system_config")
+}

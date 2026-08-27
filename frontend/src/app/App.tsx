@@ -118,7 +118,16 @@ export default function App() {
       listeningMode: profile.listeningMode || "push-to-talk",
       proactiveModeEnabled: profile.proactiveModeEnabled ?? true,
       maxProactiveNudges: profile.maxProactiveNudges ?? 2,
-      activationWord: profile.activationWord || "piggy"
+      activationWord: profile.activationWord || "piggy",
+      learnedPatterns: profile.learnedPatterns,
+      taskReminders: profile.taskReminders,
+      habitNudges: profile.habitNudges,
+      goalMilestones: profile.goalMilestones,
+      missedAlerts: profile.missedAlerts,
+      biometrics: profile.biometrics,
+      faceUnlock: profile.faceUnlock,
+      darkMode: profile.darkMode,
+      highContrast: profile.highContrast,
     });
   };
 

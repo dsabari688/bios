@@ -6,6 +6,8 @@ export interface GenerateOptions {
   format?: "json";
   temperature?: number;
   timeoutMs?: number;
+  maxRetries?: number;
+  fastChat?: boolean;
 }
 
 export class AiUnavailableError extends Error {

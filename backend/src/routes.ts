@@ -10,6 +10,7 @@ import notificationRoutes from "./modules/notifications/notification.routes.js";
 import analyticsRoutes from "./modules/analytics/analytics.routes.js";
 import syncRoutes from "./sync/sync.routes.js";
 import piggyRoutes from "./piggy/piggy.routes.js";
+import systemConfigRoutes from "./modules/system-config/system-config.routes.js";
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use("/notifications", notificationRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/sync", syncRoutes);
 router.use("/piggy", piggyRoutes);
+router.use("/system-config", systemConfigRoutes);
 
 export default router;

@@ -9,9 +9,22 @@ async function createTables(): Promise<void> {
       fact TEXT NOT NULL,
       category TEXT NOT NULL DEFAULT 'preference',
       importance INT NOT NULL DEFAULT 5,
+      status TEXT NOT NULL DEFAULT 'active',
+      superseded_by TEXT,
+      confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+      valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+      valid_until TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE piggy_memory ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+    ALTER TABLE piggy_memory ADD COLUMN IF NOT EXISTS superseded_by TEXT;
+    ALTER TABLE piggy_memory ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0;
+    ALTER TABLE piggy_memory ADD COLUMN IF NOT EXISTS valid_from TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE piggy_memory ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ;
   `);
 
   await pool.query(`
@@ -90,10 +103,8 @@ export function ensurePiggyTables(): Promise<void> {
   return tablesReady;
 }
 
-function randomId(): string {
-  return `${Date.now().toString(36)}_${Math.random()
-    .toString(36)
-    .slice(2, 10)}`;
+export function newUuid(): string {
+  return crypto.randomUUID();
 }
 
 export const piggyStore = {
@@ -111,5 +122,5 @@ export const piggyStore = {
     await pool.query(sql, params);
   },
 
-  newId: randomId,
+  newId: newUuid,
 };

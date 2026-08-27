@@ -7,6 +7,7 @@ import { expenseService } from "../services/expenseService";
 import { diaryService } from "../services/diaryService";
 import { budgetService } from "../services/budgetService";
 import { notificationService } from "../services/notificationService";
+import { systemConfigApi, type SystemConfig } from "../api/systemConfig.api";
 import { isUuid } from "../lib/taskSync";
 import { getLocalDateString, parseLocalDate } from "../lib/timeUtils";
 import {
@@ -66,6 +67,8 @@ export interface StoreState {
   isOffline: boolean;
   
   undoStack: UndoAction[];
+  systemConfig: SystemConfig | null;
+  systemConfigLoaded: boolean;
   
   // Actions
   setToken: (token: string | null) => void;
@@ -147,8 +150,18 @@ export interface StoreState {
     proactiveModeEnabled: boolean;
     maxProactiveNudges: number;
     activationWord?: string;
+    learnedPatterns?: string[];
+    taskReminders?: boolean;
+    habitNudges?: boolean;
+    goalMilestones?: boolean;
+    missedAlerts?: boolean;
+    biometrics?: boolean;
+    faceUnlock?: boolean;
+    darkMode?: boolean;
+    highContrast?: boolean;
   }) => Promise<void>;
   clearNotifications: () => Promise<void>;
+  clearChatHistory: () => void;
   sendChatMessage: (message: string, activeContext: any) => Promise<any>;
   addExpense: (expenseData: Omit<Expense, "id">) => Promise<void>;
   updateBudget: (category: string, limit: number) => Promise<void>;
@@ -165,6 +178,55 @@ export interface StoreState {
   // Undo support
   pushUndo: (description: string, execute: () => Promise<void>) => void;
   triggerUndo: () => Promise<void>;
+}
+
+function getInitialOSData(): FullOSData {
+  const defaultProfile: UserProfile = {
+    name: "Sabarinathan",
+    email: "dsabari688@gmail.com",
+    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
+    budgetLimit: 1500,
+    aiPersonality: "Logical",
+    dailyPlanningReminderTime: "21:00",
+    hasPlannedTomorrow: false,
+    listeningMode: "push-to-talk",
+    proactiveModeEnabled: true,
+    maxProactiveNudges: 3,
+    dailyReviewTime: "21:30",
+    activationWord: "piggy"
+  };
+
+  try {
+    const dataStr = typeof localStorage !== "undefined" ? localStorage.getItem("lifeos_data") : null;
+    if (dataStr) {
+      const parsed = JSON.parse(dataStr) as FullOSData;
+      return {
+        profile: parsed.profile || defaultProfile,
+        tasks: parsed.tasks || [],
+        habits: parsed.habits || [],
+        goals: parsed.goals || [],
+        expenses: parsed.expenses || [],
+        budgets: parsed.budgets || [],
+        chatHistory: parsed.chatHistory || [],
+        notifications: parsed.notifications || [],
+        diaryEntries: parsed.diaryEntries || []
+      };
+    }
+  } catch (err) {
+    console.warn("Failed to parse local osData, using defaults:", err);
+  }
+
+  return {
+    profile: defaultProfile,
+    tasks: [],
+    habits: [],
+    goals: [],
+    expenses: [],
+    budgets: [],
+    chatHistory: [],
+    notifications: [],
+    diaryEntries: []
+  };
 }
 
 export const useStore = create<StoreState>((set, get) => {
@@ -185,7 +247,7 @@ export const useStore = create<StoreState>((set, get) => {
     token: localStorage.getItem("token") || localStorage.getItem("lifeos_token") || "mock_jwt_token_lifeos_dashboard",
     isLoggedIn: true,
     currentUser: null,
-    osData: null,
+    osData: getInitialOSData(),
     isUpdatingDb: false,
     activeView: "dashboard",
     isSidebarOpen: true,
@@ -211,6 +273,8 @@ export const useStore = create<StoreState>((set, get) => {
     isOffline: typeof navigator !== "undefined" ? !navigator.onLine : false,
     
     undoStack: [],
+    systemConfig: null,
+    systemConfigLoaded: false,
 
     setToken: (token) => {
       const effectiveToken = token || "mock_jwt_token_lifeos_dashboard";
@@ -312,7 +376,7 @@ export const useStore = create<StoreState>((set, get) => {
 
       // Backend is the source of truth; cached values are the fallback
       // whenever a collection cannot be fetched (offline mode).
-      const [tasksRes, habitsRes, goalsRes, expensesRes, budgetsRes, diaryRes, notifsRes] =
+      const [tasksRes, habitsRes, goalsRes, expensesRes, budgetsRes, diaryRes, notifsRes, sysConfigRes] =
         await Promise.allSettled([
           fetchBackendTasks(),
           habitService.getAll(),
@@ -320,7 +384,8 @@ export const useStore = create<StoreState>((set, get) => {
           expenseService.getAll(),
           budgetService.getAll(),
           diaryService.getAll(),
-          notificationService.getSystemNotifications()
+          notificationService.getSystemNotifications(),
+          systemConfigApi.get()
         ]);
 
       if (tasksRes.status === "fulfilled" && tasksRes.value) {
@@ -402,8 +467,42 @@ export const useStore = create<StoreState>((set, get) => {
         data.notifications = cached?.notifications ?? [];
       }
 
+      // Merge system config into profile (backend is source of truth)
+      let loadedConfig: SystemConfig | null = null;
+      if (sysConfigRes.status === "fulfilled") {
+        loadedConfig = sysConfigRes.value;
+        data.profile = {
+          ...data.profile,
+          name: loadedConfig.name,
+          email: loadedConfig.email,
+          aiPersonality: loadedConfig.aiPersonality as any,
+          listeningMode: loadedConfig.listeningMode as any,
+          proactiveModeEnabled: loadedConfig.proactiveModeEnabled,
+          maxProactiveNudges: loadedConfig.maxProactiveNudges,
+          dailyReviewTime: loadedConfig.dailyReviewTime,
+          activationWord: loadedConfig.activationWord,
+          learnedPatterns: loadedConfig.learnedPatterns,
+          taskReminders: loadedConfig.taskReminders,
+          habitNudges: loadedConfig.habitNudges,
+          goalMilestones: loadedConfig.goalMilestones,
+          missedAlerts: loadedConfig.missedAlerts,
+          biometrics: loadedConfig.biometrics,
+          faceUnlock: loadedConfig.faceUnlock,
+          darkMode: loadedConfig.darkMode,
+          highContrast: loadedConfig.highContrast,
+        };
+
+        if (loadedConfig.darkMode) {
+          document.documentElement.classList.add("dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+        }
+      } else {
+        console.warn("System config hydration deferred/offline:", sysConfigRes.reason);
+      }
+
       localStorage.setItem("lifeos_data", JSON.stringify(data));
-      set({ osData: data });
+      set({ osData: data, systemConfig: loadedConfig, systemConfigLoaded: true });
 
       if (data.profile) {
         set({
@@ -993,10 +1092,38 @@ export const useStore = create<StoreState>((set, get) => {
           ...profileData,
           aiPersonality: profileData.aiPersonality as any,
           listeningMode: profileData.listeningMode as any,
-          activationWord: profileData.activationWord || data.profile.activationWord || "piggy"
+          activationWord: profileData.activationWord || data.profile.activationWord || "piggy",
+          learnedPatterns: profileData.learnedPatterns ?? data.profile.learnedPatterns
         };
         localStorage.setItem("lifeos_data", JSON.stringify(data));
         set({ osData: data });
+
+        // Persist to backend database
+        try {
+          const saved = await systemConfigApi.update({
+            name: profileData.name,
+            email: profileData.email,
+            aiPersonality: profileData.aiPersonality,
+            listeningMode: profileData.listeningMode,
+            proactiveModeEnabled: profileData.proactiveModeEnabled,
+            maxProactiveNudges: profileData.maxProactiveNudges,
+            dailyReviewTime: profileData.dailyReviewTime,
+            activationWord: profileData.activationWord,
+            learnedPatterns: profileData.learnedPatterns,
+            taskReminders: profileData.taskReminders,
+            habitNudges: profileData.habitNudges,
+            goalMilestones: profileData.goalMilestones,
+            missedAlerts: profileData.missedAlerts,
+            biometrics: profileData.biometrics,
+            faceUnlock: profileData.faceUnlock,
+            darkMode: profileData.darkMode,
+            highContrast: profileData.highContrast,
+          });
+          set({ systemConfig: saved });
+        } catch (syncErr) {
+          console.warn("System config sync deferred/offline:", syncErr);
+        }
+
         get().showToast("System configurations optimized.", "success");
       } catch (err) {
         console.error(err);
@@ -1021,10 +1148,24 @@ export const useStore = create<StoreState>((set, get) => {
           unreadBackendIds.map((id) => notificationService.markRead(id))
         );
 
-        get().showToast("Telemetry warnings cleared.", "info");
+        get().showToast("Notifications cleared.", "info");
       } catch (err) {
         console.error(err);
       }
+    },
+
+    clearChatHistory: () => {
+      const dataStr = localStorage.getItem("lifeos_data");
+      const currentData = get().osData || (dataStr ? JSON.parse(dataStr) : null);
+      if (!currentData) return;
+      const updatedData: FullOSData = {
+        ...currentData,
+        chatHistory: []
+      };
+      localStorage.setItem("lifeos_data", JSON.stringify(updatedData));
+      localStorage.removeItem("piggy_conversation_id");
+      set({ osData: updatedData });
+      get().showToast("Chat history cleared.", "info");
     },
 
     executeBridgeTool: async (toolName, args) => {
@@ -1113,11 +1254,6 @@ export const useStore = create<StoreState>((set, get) => {
         let reply: string;
         if (payload.success) {
           reply = payload.response || "Done.";
-          if (payload.action) {
-            reply += payload.action.executed
-              ? `\n\n*[PIGGY EXECUTED \`${payload.action.type}\` • DATABASE UPDATED]*`
-              : `\n\n*[PIGGY COULD NOT EXECUTE \`${payload.action.type}\`${payload.action.error ? `: ${payload.action.error}` : ""}]*`;
-          }
         } else {
           reply = payload.response || "I could not process that request.";
         }
@@ -1145,17 +1281,15 @@ export const useStore = create<StoreState>((set, get) => {
 
         return { success: payload.success };
       } catch (err) {
-        console.warn("[piggy] Direct Comms unavailable, using local bridge:", err);
+        console.warn("[piggy] Direct Comms unavailable, using local fallback:", err);
       }
 
-      // Intelligent AI Bridge: Determine if user request maps to an MCP tool execution
+      // Local Fallback: Determine if user request maps to a local task/habit execution
       setTimeout(() => {
-        const personality = data.profile.aiPersonality || "Logical";
         const lowerMsg = message.toLowerCase().trim();
         const todayStr = new Date().toISOString().split("T")[0];
         const nowTimeStr = new Date().toTimeString().slice(0, 5);
 
-        let executedToolInfo: { tool: string; resultMsg: string; data?: any } | null = null;
         let reply = "";
 
         const saveDataFn = (updated: any) => {
@@ -1163,15 +1297,15 @@ export const useStore = create<StoreState>((set, get) => {
           set({ osData: updated });
         };
 
-        // 1. Task Creation Detection (e.g. "add task finish deck tomorrow at 3pm", "create task refactor protocols", "new mission ...")
+        // 1. Task Creation Detection
         if (
-          (lowerMsg.startsWith("add task") || lowerMsg.startsWith("create task") || lowerMsg.startsWith("new task") || lowerMsg.startsWith("assign task") || lowerMsg.startsWith("task:") || lowerMsg.includes("designate a new core task"))
+          (lowerMsg.startsWith("add task") || lowerMsg.startsWith("create task") || lowerMsg.startsWith("new task") || lowerMsg.startsWith("assign task") || lowerMsg.startsWith("task:"))
         ) {
           let taskTitle = message
-            .replace(/^(add task|create task|new task|assign task|task:|sir, let's designate a new core task:?)/i, "")
+            .replace(/^(add task|create task|new task|assign task|task:)/i, "")
             .trim();
           
-          if (!taskTitle) taskTitle = "Tactical Mission Objective";
+          if (!taskTitle) taskTitle = "New Task";
 
           const toolRes = executeMCPTool("tasks_create", {
             title: taskTitle,
@@ -1181,40 +1315,41 @@ export const useStore = create<StoreState>((set, get) => {
           }, data, saveDataFn);
 
           if (toolRes.success) {
-            executedToolInfo = { tool: "tasks_create", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Mission Initialized: '${taskTitle}' is registered into today's tactical operations matrix [Quadrant: Urgent-Important].`;
+            reply = `Done — added task '${taskTitle}' for today.`;
           }
         }
         
-        // 2. Task Completion Detection (e.g. "complete task ...", "done task ...", "mark task done")
+        // 2. Task Completion Detection
         else if (lowerMsg.includes("complete task") || lowerMsg.includes("mark task done") || lowerMsg.includes("finished task")) {
           const match = lowerMsg.replace(/(complete task|mark task done|finished task|done task)/i, "").trim();
           const targetTask = data.tasks.find(t => t.title.toLowerCase().includes(match) || t.id === match);
           if (targetTask) {
             const toolRes = executeMCPTool("tasks_complete", { taskId: targetTask.id }, data, saveDataFn);
-            executedToolInfo = { tool: "tasks_complete", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Status Update Confirmed: '${targetTask.title}' marked as completed. Life Score index updated!`;
+            if (toolRes.success) {
+              reply = `Done — '${targetTask.title}' marked as completed.`;
+            }
           }
         }
 
-        // 3. Habit Log / Toggle Detection (e.g. "log habit morning code", "check habit gym", "mark habit done")
+        // 3. Habit Log / Toggle Detection
         else if (lowerMsg.includes("log habit") || lowerMsg.includes("mark habit") || lowerMsg.includes("check habit") || lowerMsg.includes("done with habit")) {
           const habitQuery = lowerMsg.replace(/(log habit|mark habit|check habit|done with habit)/i, "").trim();
           const targetHabit = data.habits.find(h => h.name.toLowerCase().includes(habitQuery) || h.id === habitQuery);
           if (targetHabit) {
             const toolRes = executeMCPTool("habits_log", { habitId: targetHabit.id }, data, saveDataFn);
-            executedToolInfo = { tool: "habits_log", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Habit Verified: '${targetHabit.name}' logged for today! Streak is now ${targetHabit.streak} days. Keep pushing!`;
+            if (toolRes.success) {
+              reply = `Done — '${targetHabit.name}' logged for today! Streak is now ${targetHabit.streak} days.`;
+            }
           }
         }
 
-        // 4. Expense Logging Detection (e.g. "add expense 250 for lunch", "log expense 150 coffee", "spent 500 on shopping")
+        // 4. Expense Logging Detection
         else if (lowerMsg.includes("add expense") || lowerMsg.includes("log expense") || lowerMsg.startsWith("spent ") || lowerMsg.includes("paid ₹") || lowerMsg.includes("bought ")) {
           const numMatch = lowerMsg.match(/(?:(?:rs\.?|₹|\$)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rs|inr|usd|bucks)?)/i);
           const amount = numMatch ? parseFloat(numMatch[1] || numMatch[2]) : 150;
           
           let note = message.replace(/(add expense|log expense|spent|paid|bought|for|on|₹|\$|\d+)/gi, "").trim();
-          if (!note) note = "Tactical Procurement";
+          if (!note) note = "Expense";
 
           let category: any = "food";
           if (lowerMsg.includes("shop") || lowerMsg.includes("book") || lowerMsg.includes("cloth")) category = "shopping";
@@ -1224,81 +1359,36 @@ export const useStore = create<StoreState>((set, get) => {
 
           const toolRes = executeMCPTool("expenses_add", { amount, category, note }, data, saveDataFn);
           if (toolRes.success) {
-            executedToolInfo = { tool: "expenses_add", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Financial Ledger Updated: Debit of ₹${amount} logged under '${note}' [Category: ${category}].`;
+            reply = `Done — logged ₹${amount} under '${note}'.`;
           }
         }
 
-        // 5. Goal Creation Detection (e.g. "new goal save 50000", "create goal run 5k marathon")
+        // 5. Goal Creation Detection
         else if (lowerMsg.startsWith("new goal") || lowerMsg.startsWith("create goal") || lowerMsg.startsWith("add goal")) {
-          const goalTitle = message.replace(/(new goal|create goal|add goal):?/i, "").trim() || "Strategic Objective";
+          const goalTitle = message.replace(/(new goal|create goal|add goal):?/i, "").trim() || "New Goal";
           const toolRes = executeMCPTool("goals_create", {
             title: goalTitle,
             targetDate: "2026-12-31",
             progress: 0
           }, data, saveDataFn);
           if (toolRes.success) {
-            executedToolInfo = { tool: "goals_create", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Strategic Vault Entry Initialized: Goal '${goalTitle}' locked in.`;
+            reply = `Done — goal '${goalTitle}' added.`;
           }
         }
 
-        // 6. Focus Score / Life Score Query
-        else if (lowerMsg.includes("life score") || lowerMsg.includes("focus index") || lowerMsg.includes("productivity review") || lowerMsg.includes("my score")) {
-          const toolRes = executeMCPTool("system_get_life_score", {}, data, saveDataFn);
-          executedToolInfo = { tool: "system_get_life_score", resultMsg: toolRes.message, data: toolRes.data };
-          reply = `Life OS Telemetry: Compound Focus Index is ${toolRes.data?.lifeScore}%. Daily Tasks: ${toolRes.data?.taskRate}%, Routine Cadence: ${toolRes.data?.habitRate}%, Vault Trajectory: ${toolRes.data?.goalRate}%. Rating: ${toolRes.data?.tier}.`;
-        }
-
-        // If no tool was explicitly executed, provide smart personality response
+        // Default fallback response
         if (!reply) {
           const pendingTasks = data.tasks.filter(t => t.status === "pending");
-          const totalExpenses = data.expenses.reduce((sum, e) => sum + e.amount, 0);
-
-          if (lowerMsg.includes("budget") || lowerMsg.includes("expens") || lowerMsg.includes("money") || lowerMsg.includes("spend")) {
-            const toolRes = executeMCPTool("budget_check", {}, data, saveDataFn);
-            executedToolInfo = { tool: "budget_check", resultMsg: toolRes.message, data: toolRes.data };
-            if (personality === "Cynical") {
-              reply = `Checking the damage: We've allocated ₹${totalExpenses} against ₹${data.profile.budgetLimit}. Utilization is at ${toolRes.data?.utilizationPercent}%. Try to refrain from unnecessary transactions.`;
-            } else if (personality === "Energetic") {
-              reply = `Financial Ledger Check! Total allocations: ₹${totalExpenses} / ₹${data.profile.budgetLimit} (${toolRes.data?.utilizationPercent}%). Staying well inside the guardrails! 🚀`;
-            } else if (personality === "Calm") {
-              reply = `A peaceful assessment of our financial ledgers shows recent allocations total ₹${totalExpenses} of ₹${data.profile.budgetLimit}. Mindful spending maintains harmony.`;
-            } else {
-              reply = `Financial status: ₹${totalExpenses} spent against ₹${data.profile.budgetLimit} limit (${toolRes.data?.utilizationPercent}% utilization). Status: ${toolRes.data?.status}.`;
-            }
-          } else if (lowerMsg.includes("task") || lowerMsg.includes("mission") || lowerMsg.includes("todo") || lowerMsg.includes("plan")) {
-            const taskListStr = pendingTasks.slice(0, 4).map(t => `'${t.title}'`).join(", ");
+          if (lowerMsg.includes("task") || lowerMsg.includes("todo") || lowerMsg.includes("plan")) {
             if (pendingTasks.length === 0) {
-              reply = `All active tactical missions have been completed for today, Sir. Telemetry indicates 100% execution throughput.`;
+              reply = "You have no pending tasks right now.";
             } else {
-              reply = `Backlog parsing completed. There are ${pendingTasks.length} pending missions: ${taskListStr}. Optimal routing recommends tackling high-priority missions first.`;
+              const taskListStr = pendingTasks.slice(0, 4).map(t => `• ${t.title}`).join("\n");
+              reply = `Here are your pending tasks:\n${taskListStr}`;
             }
-          } else if (lowerMsg.includes("habit") || lowerMsg.includes("streak") || lowerMsg.includes("routine")) {
-            const bestHabit = data.habits.length > 0 ? data.habits.reduce((prev, current) => (prev.streak > current.streak) ? prev : current) : null;
-            const bestStr = bestHabit ? `'${bestHabit.name}' on a ${bestHabit.streak}-day streak` : "no active routines";
-            reply = `Routine tracking telemetry updated. Highest momentum routine is currently ${bestStr}. Cumulative daily habit adherence rate is 78%.`;
-          } else if (lowerMsg.includes("remember") || lowerMsg.includes("recall context") || lowerMsg.includes("preference")) {
-            const toolRes = executeMCPTool("system_get_context", {}, data, saveDataFn);
-            executedToolInfo = { tool: "system_get_context", resultMsg: toolRes.message, data: toolRes.data };
-            reply = `Context Recalled: User '${data.profile.name}', AI Mode '${data.profile.aiPersonality}', ${pendingTasks.length} pending missions today, ${data.habits.length} tracked habits, and ₹${totalExpenses} allocated this cycle.`;
           } else {
-            if (personality === "Cynical") {
-              reply = `Life OS online. I'm connected to all tools (Tasks, Habits, Expenses, Vault, Sleep). What do you need executed?`;
-            } else if (personality === "Energetic") {
-              reply = `J.A.R.V.I.S. and Piggy are linked to all tools across the OS! Ask me to add tasks, log expenses, check streaks, or query the MCP bridge! 🎯`;
-            } else if (personality === "Calm") {
-              reply = `All tools and MCP servers are connected in harmony. Let me know what you would like to organize or log.`;
-            } else {
-              reply = `AI Bridge operational. All 20+ MCP tools (Tasks, Habits, Goals, Expenses, Diary, Telemetry) are active and ready for execution.`;
-            }
+            reply = "I'm offline right now, but I can help you log tasks, habits, and expenses locally.";
           }
-        }
-
-        if (executedToolInfo) {
-          reply += `\n\n*[AI BRIDGE EXECUTION: Invoked tool \`${executedToolInfo.tool}\` • Status: OK • Telemetry Synced]*`;
-        } else {
-          reply += `\n\n*[PIGGY SECURE AUDIT: Logic verified. MCP Bridge listening. 0 conflicts detected.]*`;
         }
 
         const assistantMessage: ChatMessage = {
