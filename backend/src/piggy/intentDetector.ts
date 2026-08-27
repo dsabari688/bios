@@ -265,17 +265,30 @@ export const intentDetector = {
       throw err;
     }
 
-    if (
-      decision.kind === "action" &&
-      decision.tool &&
-      DESTRUCTIVE_TOOLS.has(decision.tool) &&
-      decision.confidence < DESTRUCTIVE_CONFIDENCE_THRESHOLD
-    ) {
-      return {
-        kind: "answer",
-        confidence: decision.confidence,
-        reply: `I want to be sure before deleting anything. ${decision.reply || "Can you confirm exactly which item?"}`.trim(),
-      };
+    // ─── Confidence Taxonomy Thresholds ────────────────────────────────
+    if (decision.kind === "action" && decision.tool) {
+      const isDestructive = DESTRUCTIVE_TOOLS.has(decision.tool);
+      const minThreshold = isDestructive ? DESTRUCTIVE_CONFIDENCE_THRESHOLD : CONFIDENCE_THRESHOLD;
+
+      // Tier 3: Low confidence (< 0.60) -> Don't execute, ask user to rephrase
+      if (decision.confidence < 0.60) {
+        console.warn(`[PIGGY][INTENT] Low confidence action (${decision.confidence.toFixed(2)}) for ${decision.tool}. Asking rephrase.`);
+        return {
+          kind: "answer",
+          confidence: decision.confidence,
+          reply: "I'm not quite sure what you'd like me to do. Could you try rephrasing that command?",
+        };
+      }
+
+      // Tier 2: Medium confidence (0.60 <= confidence < 0.85) -> Clarify before executing
+      if (decision.confidence < minThreshold) {
+        console.warn(`[PIGGY][INTENT] Medium confidence action (${decision.confidence.toFixed(2)}) for ${decision.tool}. Asking clarification.`);
+        return {
+          kind: "answer",
+          confidence: decision.confidence,
+          reply: `Did you want me to ${decision.tool.replace("piggy_", "").replace("_", " ")}? Please confirm.`,
+        };
+      }
     }
 
     if (

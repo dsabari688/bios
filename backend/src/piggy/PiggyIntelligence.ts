@@ -18,6 +18,11 @@ import { piggyStore } from "./piggyStore.js";
 import { conversationState } from "./conversationState.js";
 import { startSlotFilling, continueSlotFilling, formatConfirmation, SLOT_DEFINITIONS, parseDate } from "./slotFiller.js";
 import { formatToolResult, sanitizeUserResponse } from "./responseFormatter.js";
+import { validateToolSchema } from "./schemaValidator.js";
+import { isMultiCommandMessage, splitMultiCommandMessage } from "./multiIntentSplitter.js";
+import { resolveCandidateSelection } from "./entityResolver.js";
+import { executeActionSafely, executeMultiActionSequence, isDangerousBulkAction } from "./actionEngine.js";
+import { analyzeSecurityContext } from "./securityGuard.js";
 
 export interface ChatRequest {
   message: string;
@@ -240,7 +245,11 @@ export const piggyIntelligence = {
 
         await persistMessage({ conversationId, role: "user", content: message });
 
-        if ("cancelled" in slotResult && slotResult.cancelled) {
+        if ("interrupted" in slotResult && slotResult.interrupted) {
+          console.log(`[PIGGY][SLOT] Pending action interrupted by new user intent. Clearing pending action.`);
+          conversationState.clearPendingAction(conversationId);
+          // Fall through to step 2 (fresh intent processing)
+        } else if ("cancelled" in slotResult && slotResult.cancelled) {
           conversationState.clearPendingAction(conversationId);
           const cancelMsg = slotResult.message || "No problem — I cancelled that.";
           await persistMessage({ conversationId, role: "assistant", content: cancelMsg });
@@ -249,9 +258,7 @@ export const piggyIntelligence = {
             conversationId,
             response: cancelMsg,
           };
-        }
-
-        if (!slotResult.ready) {
+        } else if (!slotResult.ready) {
           // Still collecting — ask next question
           conversationState.setPendingAction(conversationId, slotResult.updatedAction);
           const question = sanitizeUserResponse(slotResult.question);
@@ -261,32 +268,32 @@ export const piggyIntelligence = {
             conversationId,
             response: question,
           };
+        } else {
+          // All slots collected — execute the tool
+          conversationState.clearPendingAction(conversationId);
+
+          console.log(`[PIGGY][SLOT] executing ${pending.tool} with args:`, slotResult.args);
+          const result = await executeActionSafely(conversationId, pending.tool, slotResult.args);
+
+          const responseText = sanitizeUserResponse(formatToolResult(pending.tool, result, slotResult.args));
+          await persistMessage({
+            conversationId,
+            role: "assistant",
+            content: responseText,
+            intent: pending.tool,
+            actionType: pending.tool,
+            actionExecuted: result.success,
+          });
+
+          console.log(`[PIGGY][SLOT] tool=${pending.tool} success=${result.success} (${Date.now() - startTime}ms)`);
+          return {
+            success: result.success,
+            conversationId,
+            response: responseText,
+            action: { type: pending.tool, executed: result.success },
+            data: result.data,
+          };
         }
-
-        // All slots collected — execute the tool
-        conversationState.clearPendingAction(conversationId);
-
-        console.log(`[PIGGY][SLOT] executing ${pending.tool} with args:`, slotResult.args);
-        const result = await executePiggyTool(pending.tool, slotResult.args);
-
-        const responseText = sanitizeUserResponse(formatToolResult(pending.tool, result, slotResult.args));
-        await persistMessage({
-          conversationId,
-          role: "assistant",
-          content: responseText,
-          intent: pending.tool,
-          actionType: pending.tool,
-          actionExecuted: result.success,
-        });
-
-        console.log(`[PIGGY][SLOT] tool=${pending.tool} success=${result.success} (${Date.now() - startTime}ms)`);
-        return {
-          success: result.success,
-          conversationId,
-          response: responseText,
-          action: { type: pending.tool, executed: result.success },
-          data: result.data,
-        };
       }
 
       // ─── STEP 2: Check for natural-language task creation ──────────────
@@ -451,6 +458,35 @@ export const piggyIntelligence = {
         };
       }
 
+      // Check schema validity & range constraints (e.g. goal progress 0-100%)
+      const validation = validateToolSchema(decision.tool, decision.args ?? {});
+      if (!validation.valid) {
+        const errorText = validation.errors.join(" ");
+        await persistMessage({ conversationId, role: "user", content: message });
+        await persistMessage({ conversationId, role: "assistant", content: errorText });
+        return {
+          success: false,
+          conversationId,
+          response: errorText,
+          errorCategory: "schema_validation_failed",
+        };
+      }
+
+      decision.args = validation.normalizedArgs;
+
+      // Check dangerous bulk action confirmation requirement
+      const dangerousCheck = isDangerousBulkAction(decision.tool, decision.args);
+      if (dangerousCheck.isDangerous) {
+        const confirmMsg = dangerousCheck.warningMsg!;
+        await persistMessage({ conversationId, role: "user", content: message });
+        await persistMessage({ conversationId, role: "assistant", content: confirmMsg });
+        return {
+          success: true,
+          conversationId,
+          response: confirmMsg,
+        };
+      }
+
       // Check if this action needs slot-filling
       const toolSlots = SLOT_DEFINITIONS[decision.tool];
       if (toolSlots) {
@@ -467,13 +503,12 @@ export const piggyIntelligence = {
           await persistMessage({ conversationId, role: "assistant", content: question });
           return { success: true, conversationId, response: question };
         }
-        // All slots filled — continue with execution using slotResult.args
         decision.args = slotResult.args;
       }
 
       console.log(`[PIGGY] executing ${decision.tool}`);
 
-      const result = await executePiggyTool(decision.tool, decision.args ?? {});
+      const result = await executeActionSafely(conversationId, decision.tool, decision.args ?? {});
 
       console.log(
         `[PIGGY] ${decision.tool} -> ${result.success ? "ok" : "failed"} (${Date.now() - startTime}ms)`,
@@ -482,7 +517,7 @@ export const piggyIntelligence = {
       await persistMessage({ conversationId, role: "user", content: message });
 
       if (!result.success) {
-        const errorMsg = "I couldn't do that right now. Want me to try again?";
+        const errorMsg = result.message || "I couldn't do that right now. Want me to try again?";
         console.error(`[PIGGY] ${decision.tool} failed:`, result.error);
         await persistMessage({
           conversationId,

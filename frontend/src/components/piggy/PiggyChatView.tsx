@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, Send } from "lucide-react";
+import { Mic, Send, Trash2 } from "lucide-react";
 import { ChatMessage } from "../../types";
 import { useStore } from "../../store/useStore";
 import { formatTimestamp12Hour } from "../../lib/timeUtils";
@@ -440,9 +440,11 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
             <button
               type="button"
               onClick={() => clearChatHistory()}
-              className="text-[10px] font-mono text-slate-400 hover:text-rose-500 px-2 py-0.5 rounded border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer"
+              title="Clear chat history / New conversation"
+              className="group flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-rose-600 px-2.5 py-1 rounded-lg border border-slate-200 hover:border-rose-200 hover:bg-rose-50/50 transition-all cursor-pointer shadow-xs active:scale-95"
             >
-              Clear Chat
+              <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-500 transition-colors" />
+              <span>Clear Chat</span>
             </button>
             <span className="font-mono text-[9px] font-bold text-emerald-600">● Online</span>
           </div>
