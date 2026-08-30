@@ -29,15 +29,54 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
   const fetchMetrics = useCallback(async (days: number) => {
     setLoading(true);
     setError(null);
+
+    const computeLocalMetrics = (): DiagnosticMetrics => {
+      const totalTrackedTasks = tasks.length;
+      const completedTasks = tasks.filter(t => t.status === "completed").length;
+      const missedTasks = tasks.filter(t => t.status === "pending" && t.date < new Date().toISOString().split("T")[0]).length;
+      const completionRate = totalTrackedTasks > 0 ? Math.round((completedTasks / totalTrackedTasks) * 100) : 0;
+
+      const flow = [];
+      const now = new Date();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split("T")[0];
+        const dayTasks = tasks.filter(t => t.date === dateStr);
+        const dayDone = dayTasks.filter(t => t.status === "completed").length;
+        const dayRate = dayTasks.length > 0 ? Math.round((dayDone / dayTasks.length) * 100) : 0;
+        flow.push({
+          date: dateStr,
+          totalTasks: dayTasks.length,
+          completedTasks: dayDone,
+          missedTasks: dayTasks.filter(t => t.status === "pending").length,
+          completionRate: dayRate,
+          focusBlocksCompleted: dayDone
+        });
+      }
+
+      return {
+        totalTrackedTasks,
+        completionRate,
+        missedTasks,
+        focusBlocksCompleted: completedTasks,
+        chronologicalFlow: flow
+      };
+    };
+
     try {
       const data = await analyticsApi.getDiagnosticMetrics(days);
-      setMetrics(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load metrics");
+      if (data && Array.isArray(data.chronologicalFlow)) {
+        setMetrics(data);
+      } else {
+        setMetrics(computeLocalMetrics());
+      }
+    } catch {
+      setMetrics(computeLocalMetrics());
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tasks]);
 
   useEffect(() => {
     fetchMetrics(selectedDays);

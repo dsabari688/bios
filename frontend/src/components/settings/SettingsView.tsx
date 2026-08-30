@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle } from "lucide-react";
+import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle, Server, Wifi } from "lucide-react";
 import { useStore } from "../../store/useStore";
+import { getApiBaseUrl, setCustomServerUrl } from "../../api/client";
+import { connectionMonitor } from "../../sync/connectionMonitor";
 
 interface SettingsViewProps {
   initialProfile: {
@@ -47,8 +49,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [importData, setImportData] = useState<any>(null);
 
   const handleBackupExport = () => {
-    fetch("/api/data", {
-      headers: { "Authorization": `Bearer ${token}` }
+    const baseUrl = getApiBaseUrl();
+    fetch(`${baseUrl}/data`, {
+      headers: { ...(token ? { "Authorization": `Bearer ${token}` } : {}) }
     })
       .then(res => res.json())
       .then(data => {
@@ -72,11 +75,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const executeBackupImport = async (data: any) => {
     try {
-      const res = await fetch("/api/data/import", {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/data/import`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
         },
         body: JSON.stringify(data)
       });
@@ -121,6 +125,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [email, setEmail] = useState(initialProfile.email);
   const [personality, setPersonality] = useState(initialProfile.aiPersonality);
   const [activationWord, setActivationWord] = useState(initialProfile.activationWord || "piggy");
+  const [serverIpUrl, setServerIpUrl] = useState(() => (typeof window !== "undefined" && window.localStorage ? localStorage.getItem("bios_server_url") || "" : ""));
+
+  const handleSaveServerIpUrl = () => {
+    setCustomServerUrl(serverIpUrl);
+    connectionMonitor.checkServerHealth();
+    showToast("Server Host IP parameters updated. Triggered health check.", "success");
+  };
 
   // New J.A.R.V.I.S states
   const [listeningMode, setListeningMode] = useState<'always-listening' | 'push-to-talk' | 'text-only'>(initialProfile.listeningMode || "push-to-talk");
@@ -334,6 +345,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 bg-slate-50/50 rounded-xl text-slate-800 text-sm focus:outline-none focus:border-amber-500"
                 />
+              </div>
+            </div>
+
+            {/* Cross-Device Server Uplink Card */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-2 font-mono">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-bold text-xs uppercase font-display">
+                <Server className="w-4 h-4 text-amber-500" />
+                Cross-Device Server Host IP (Mobile Uplink)
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans leading-relaxed">
+                When using the Android mobile app, enter your Windows PC local Wi-Fi IP address (e.g. <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-amber-500 font-mono">http://192.168.1.15:5000</code>) to connect to your PC database.
+              </p>
+              <div className="flex gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="http://192.168.x.x:5000"
+                  value={serverIpUrl}
+                  onChange={(e) => setServerIpUrl(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 text-xs focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveServerIpUrl}
+                  className="px-4 py-2 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white font-display font-bold text-xs rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save Server IP
+                </button>
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono pt-1">
+                Active Endpoint: <span className="text-slate-700 dark:text-slate-300 font-bold">{getApiBaseUrl()}</span>
               </div>
             </div>
 

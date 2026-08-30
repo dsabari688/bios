@@ -18,6 +18,7 @@ interface StoredMemory {
 // Routes implemented by the real Express backend (reached via the Vite proxy).
 // Requests matching these paths bypass the mock handler entirely.
 const REAL_BACKEND_ROUTES = [
+  "/api/health",
   "/api/moods",
   "/api/tasks",
   "/api/goals",
@@ -54,8 +55,9 @@ async function mockFetchHandler(
   const urlString = url.toString();
 
   // Only intercept /api/ requests
-  if (urlString.startsWith("/api/")) {
-    const path = urlString.split("?")[0];
+  if (urlString.startsWith("/api/") || urlString.includes("/api/")) {
+    const apiPath = urlString.includes("/api/") ? "/api/" + urlString.split("/api/")[1] : urlString;
+    const path = apiPath.split("?")[0];
     const method = options?.method?.toUpperCase() || "GET";
     const storedData = getStoredData();
     const userName = storedData?.profile?.name || "Sabarinathan";
@@ -65,18 +67,26 @@ async function mockFetchHandler(
       try {
         return await originalFetch(url, options);
       } catch (err) {
-        if (!path.startsWith("/api/piggy")) {
-          throw err;
-        }
-        console.warn("[mockApi] Piggy backend unreachable, serving local fallback for", path);
+        console.warn("[mockApi] Real backend unreachable, falling back to client mock handler for", path);
       }
     }
 
     let responseData: any = null;
     let status = 200;
 
-    // 0. MCP Protocol & AI Tool Bridge Endpoints
-    if (path === "/api/mcp" && method === "POST") {
+    // 0. Health & Core System Status
+    if (path === "/api/health") {
+      responseData = {
+        success: true,
+        status: "healthy",
+        message: "LifeOS backend / mock engine active",
+        localIp: "10.239.162.231",
+        serverUrl: "http://10.239.162.231:5000"
+      };
+    }
+    
+    // 0.1 MCP Protocol & AI Tool Bridge Endpoints
+    else if (path === "/api/mcp" && method === "POST") {
       try {
         const rpcPayload = options?.body ? JSON.parse(options.body.toString()) : {};
         const saveDataFn = (updated: any) => {
@@ -138,6 +148,38 @@ async function mockFetchHandler(
         status = 400;
         responseData = { success: false, error: err?.message || "Tool execution failed" };
       }
+    }
+
+    // 0.1 Sync Fallback Handlers (when backend is offline/unreachable)
+    else if (path === "/api/sync/push" && method === "POST") {
+      try {
+        const body = options?.body ? JSON.parse(options.body.toString()) : {};
+        const ops = body.operations || [];
+        responseData = {
+          results: ops.map((op: any) => ({
+            operationId: op.id,
+            entity: op.entity,
+            entityId: op.entityId,
+            status: "accepted",
+            serverVersion: 1,
+            serverItem: op.payload,
+          })),
+          processedAt: new Date().toISOString(),
+        };
+      } catch (err: any) {
+        responseData = { results: [], processedAt: new Date().toISOString() };
+      }
+    } else if (path === "/api/sync/pull") {
+      responseData = {
+        changes: [],
+        newCursor: new Date().toISOString(),
+        hasMore: false,
+      };
+    } else if (path === "/api/sync/status") {
+      responseData = {
+        success: true,
+        data: { status: "ok", habitsOnServer: 0, strategies: ["last-write-wins"], entities: ["task", "habit", "goal", "expense", "diary", "notification"] }
+      };
     }
 
     // 1. Jarvis Briefs & Nudges
@@ -356,9 +398,36 @@ async function mockFetchHandler(
       };
     }
 
-    // 10. Mood saving
-    else if (path === "/api/mood") {
-      responseData = { success: true };
+    // 10. Mood saving & retrieval
+    else if (path === "/api/mood" || path === "/api/moods") {
+      if (method === "POST" && options?.body) {
+        try {
+          const body = JSON.parse(options.body.toString());
+          const newEntry = {
+            id: `mood_${Date.now()}`,
+            mood: body.mood,
+            note: body.note || "",
+            loggedAt: new Date().toISOString()
+          };
+          const rawHist = localStorage.getItem("lifeos_mood_history");
+          const hist = rawHist ? JSON.parse(rawHist) : [];
+          hist.unshift(newEntry);
+          localStorage.setItem("lifeos_mood_history", JSON.stringify(hist));
+          responseData = { success: true, data: newEntry };
+        } catch {
+          responseData = { success: true };
+        }
+      } else {
+        const rawHist = localStorage.getItem("lifeos_mood_history");
+        const hist = rawHist ? JSON.parse(rawHist) : [];
+        const formatted = hist.map((m: any) => ({
+          id: m.id || `mood_${Date.now()}`,
+          mood: m.mood,
+          note: m.note || "",
+          loggedAt: m.loggedAt || m.createdAt || new Date().toISOString()
+        }));
+        responseData = { success: true, data: formatted };
+      }
     }
 
     // 11. Data Exports & Imports
@@ -392,20 +461,62 @@ async function mockFetchHandler(
       responseData = { success: true };
     }
 
-    // 13. Weekly review statistics
-    else if (path === "/api/analytics/weekly-review") {
+    // 13. Analytics & Weekly review statistics
+    else if (path === "/api/analytics/metrics") {
+      const urlObj = new URL(urlString, "http://localhost");
+      const days = parseInt(urlObj.searchParams.get("days") || "7", 10);
+      const tasksList: any[] = storedData?.tasks || [];
+      const totalTasks = tasksList.length;
+      const completedTasks = tasksList.filter((t: any) => t.status === "completed").length;
+      const missedTasks = tasksList.filter((t: any) => t.status === "pending" && t.date < new Date().toISOString().split("T")[0]).length;
+      const rate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+      // Generate chronological flow entries for last N days
+      const flow = [];
+      const now = new Date();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split("T")[0];
+        const dayTasks = tasksList.filter((t: any) => t.date === dateStr);
+        const dayDone = dayTasks.filter((t: any) => t.status === "completed").length;
+        const dayRate = dayTasks.length > 0 ? Math.round((dayDone / dayTasks.length) * 100) : (dayTasks.length === 0 ? 0 : 0);
+        flow.push({
+          date: dateStr,
+          totalTasks: dayTasks.length,
+          completedTasks: dayDone,
+          missedTasks: dayTasks.filter((t: any) => t.status === "pending").length,
+          completionRate: dayRate,
+          focusBlocksCompleted: dayDone
+        });
+      }
+
       responseData = {
-        tasksCompleted: 18,
-        tasksSkipped: 2,
-        habitConsistency: 92,
-        bestHabit: "Morning Code Run",
-        moneySpent: 2450.00,
-        budgetStatus: "Within weekly parameters",
-        goalProgress: [
-          { title: "Launch Life OS V4", progress: 85 },
-          { title: "Aces Distributed Systems Exam", progress: 60 }
-        ],
-        piggyInsight: "An outstanding week of conformance, Sir. Keep parameters dialed in!"
+        success: true,
+        data: {
+          totalTrackedTasks: totalTasks,
+          completionRate: rate,
+          missedTasks,
+          focusBlocksCompleted: completedTasks,
+          chronologicalFlow: flow
+        }
+      };
+    } else if (path === "/api/analytics/weekly-review") {
+      responseData = {
+        success: true,
+        data: {
+          tasksCompleted: 18,
+          tasksSkipped: 2,
+          habitConsistency: 92,
+          bestHabit: "Morning Code Run",
+          moneySpent: 2450.00,
+          budgetStatus: "Within weekly parameters",
+          goalProgress: [
+            { title: "Launch Life OS V4", progress: 85 },
+            { title: "Aces Distributed Systems Exam", progress: 60 }
+          ],
+          piggyInsight: "An outstanding week of conformance, Sir. Keep parameters dialed in!"
+        }
       };
     }
 

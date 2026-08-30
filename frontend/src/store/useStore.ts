@@ -8,8 +8,18 @@ import { diaryService } from "../services/diaryService";
 import { budgetService } from "../services/budgetService";
 import { notificationService } from "../services/notificationService";
 import { systemConfigApi, type SystemConfig } from "../api/systemConfig.api";
+import { habitsApi } from "../api/habits.api";
+import { fetchGoals } from "../api/goals.api";
+import { expensesApi } from "../api/expenses.api";
+import { diaryApi } from "../api/diary.api";
 import { isUuid } from "../lib/taskSync";
 import { getLocalDateString, parseLocalDate } from "../lib/timeUtils";
+import { taskRepository } from "../db/repositories/taskRepository";
+import { habitRepository } from "../db/repositories/habitRepository";
+import { goalRepository } from "../db/repositories/goalRepository";
+import { expenseRepository } from "../db/repositories/expenseRepository";
+import { diaryRepository } from "../db/repositories/diaryRepository";
+import { syncManager } from "../sync/syncManager";
 import {
   backendToTask,
   fetchBackendTasks,
@@ -19,6 +29,7 @@ import {
   syncSetTaskStatus,
   syncUpdateTask
 } from "../lib/taskSync";
+import { getApiBaseUrl } from "../api/client";
 
 export interface ToastMessage {
   id: string;
@@ -216,7 +227,7 @@ function getInitialOSData(): FullOSData {
     console.warn("Failed to parse local osData, using defaults:", err);
   }
 
-  return {
+  const initial: FullOSData = {
     profile: defaultProfile,
     tasks: [],
     habits: [],
@@ -227,6 +238,34 @@ function getInitialOSData(): FullOSData {
     notifications: [],
     diaryEntries: []
   };
+
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem("lifeos_data", JSON.stringify(initial));
+    } catch (e) {}
+  }
+
+  return initial;
+}
+
+function getOSDataFromStoreOrLocalStorage(set: any, get: () => StoreState): FullOSData {
+  let data = get().osData;
+  if (data) return data;
+
+  try {
+    const dataStr = typeof localStorage !== "undefined" ? localStorage.getItem("lifeos_data") : null;
+    if (dataStr) {
+      data = JSON.parse(dataStr) as FullOSData;
+      set({ osData: data });
+      return data;
+    }
+  } catch (e) {
+    console.warn("Failed to parse lifeos_data from localStorage", e);
+  }
+
+  const defaultOSData = getInitialOSData();
+  set({ osData: defaultOSData });
+  return defaultOSData;
 }
 
 export const useStore = create<StoreState>((set, get) => {
@@ -244,13 +283,22 @@ export const useStore = create<StoreState>((set, get) => {
   }
 
   return {
-    token: localStorage.getItem("token") || localStorage.getItem("lifeos_token") || "mock_jwt_token_lifeos_dashboard",
+    token: (() => {
+      const stored = localStorage.getItem("token") || localStorage.getItem("lifeos_token");
+      if (stored && stored.trim() !== "") return stored;
+      const defaultToken = "mock_jwt_token_lifeos_dashboard";
+      try {
+        localStorage.setItem("token", defaultToken);
+        localStorage.setItem("lifeos_token", defaultToken);
+      } catch {}
+      return defaultToken;
+    })(),
     isLoggedIn: true,
     currentUser: null,
     osData: getInitialOSData(),
     isUpdatingDb: false,
     activeView: "dashboard",
-    isSidebarOpen: true,
+    isSidebarOpen: false,
     notificationsOpen: false,
     toasts: [],
     loginUsername: "Sabarinathan",
@@ -379,59 +427,121 @@ export const useStore = create<StoreState>((set, get) => {
       const [tasksRes, habitsRes, goalsRes, expensesRes, budgetsRes, diaryRes, notifsRes, sysConfigRes] =
         await Promise.allSettled([
           fetchBackendTasks(),
-          habitService.getAll(),
-          goalService.getAll(get().token),
-          expenseService.getAll(),
+          habitsApi.getAll(),
+          fetchGoals(),
+          expensesApi.getAll(),
           budgetService.getAll(),
-          diaryService.getAll(),
+          diaryApi.getAll(),
           notificationService.getSystemNotifications(),
           systemConfigApi.get()
         ]);
 
       if (tasksRes.status === "fulfilled" && tasksRes.value) {
         const backendTasks = tasksRes.value.map(backendToTask);
-        const localOnly = (cached?.tasks ?? []).filter(
-          (t) => !isUuid(t.id) && !backendTasks.some((b) => b.id === t.id)
-        );
-        data.tasks = [...backendTasks, ...localOnly];
+        for (const bt of backendTasks) {
+          await taskRepository.save(bt as any, true).catch(() => {});
+        }
+        const repoTasks = await taskRepository.getAll();
+        const mergedTasks = [...backendTasks];
+
+        for (const local of repoTasks) {
+          if (!mergedTasks.some((b) => b.id === local.id) && !(local as any)._deletedAt) {
+            if ((local as any)._syncStatus === "synced") {
+              await taskRepository.remove(local.id, true).catch(() => {});
+            } else {
+              const rawDate = local.date || new Date().toISOString();
+              const dateStr = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate;
+              mergedTasks.push({
+                id: local.id,
+                title: local.title,
+                description: local.description,
+                date: dateStr,
+                time: local.time || "09:00",
+                endTime: local.endTime,
+                category: (local.category as any) || "important-not-urgent",
+                recurType: local.recurType || "none",
+                status: local.status === "completed" ? "completed" : "pending",
+                rescheduledCount: local.rescheduledCount || 0,
+              });
+            }
+          }
+        }
+        data.tasks = mergedTasks;
       } else {
         if (tasksRes.status === "rejected") {
           console.warn("Task hydration deferred/offline:", tasksRes.reason);
         }
-        data.tasks = cached?.tasks ?? [];
+        const repoTasks = await taskRepository.getAll();
+        data.tasks = repoTasks.length > 0 ? (repoTasks.filter((t) => !(t as any)._deletedAt) as any) : (cached?.tasks ?? []);
       }
 
-      if (habitsRes.status === "fulfilled") {
+      if (habitsRes.status === "fulfilled" && Array.isArray(habitsRes.value)) {
         const backendHabits = habitsRes.value;
-        const localOnly = (cached?.habits ?? []).filter(
-          (h) => !isUuid(h.id) && !backendHabits.some((b) => b.id === h.id)
-        );
-        data.habits = [...backendHabits, ...localOnly];
+        for (const bh of backendHabits) {
+          await habitRepository.save(bh as any, true).catch(() => {});
+        }
+        const localHabits = await habitRepository.getAll();
+        const mergedHabits = [...backendHabits];
+        for (const lh of localHabits) {
+          if (!mergedHabits.some((b) => b.id === lh.id) && !(lh as any)._deletedAt) {
+            if (lh._syncStatus === "synced") {
+              await habitRepository.remove(lh.id, true).catch(() => {});
+            } else {
+              mergedHabits.push(lh as any);
+            }
+          }
+        }
+        data.habits = mergedHabits;
       } else {
         console.warn("Habit hydration deferred/offline:", habitsRes.reason);
-        data.habits = cached?.habits ?? [];
+        const localHabits = await habitRepository.getAll();
+        data.habits = localHabits.filter((h) => !(h as any)._deletedAt) as any;
       }
 
-      if (goalsRes.status === "fulfilled") {
+      if (goalsRes.status === "fulfilled" && Array.isArray(goalsRes.value)) {
         const backendGoals = goalsRes.value;
-        const localOnly = (cached?.goals ?? []).filter(
-          (g) => !isUuid(g.id) && !backendGoals.some((b) => b.id === g.id)
-        );
-        data.goals = [...backendGoals, ...localOnly];
+        for (const bg of backendGoals) {
+          await goalRepository.save(bg as any, true).catch(() => {});
+        }
+        const localGoals = await goalRepository.getAll();
+        const mergedGoals = [...backendGoals];
+        for (const lg of localGoals) {
+          if (!mergedGoals.some((b) => b.id === lg.id) && !(lg as any)._deletedAt) {
+            if ((lg as any)._syncStatus === "synced") {
+              await goalRepository.remove(lg.id, true).catch(() => {});
+            } else {
+              mergedGoals.push(lg as any);
+            }
+          }
+        }
+        data.goals = mergedGoals;
       } else {
         console.warn("Goal hydration deferred/offline:", goalsRes.reason);
-        data.goals = cached?.goals ?? [];
+        const localGoals = await goalRepository.getAll();
+        data.goals = localGoals.filter((g) => !(g as any)._deletedAt) as any;
       }
 
-      if (expensesRes.status === "fulfilled") {
+      if (expensesRes.status === "fulfilled" && Array.isArray(expensesRes.value)) {
         const backendExpenses = expensesRes.value;
-        const localOnly = (cached?.expenses ?? []).filter(
-          (e) => !isUuid(e.id) && !backendExpenses.some((b) => b.id === e.id)
-        );
-        data.expenses = [...backendExpenses, ...localOnly];
+        for (const be of backendExpenses) {
+          await expenseRepository.save(be as any, true).catch(() => {});
+        }
+        const localExpenses = await expenseRepository.getAll();
+        const mergedExpenses = [...backendExpenses];
+        for (const le of localExpenses) {
+          if (!mergedExpenses.some((b) => b.id === le.id) && !(le as any)._deletedAt) {
+            if ((le as any)._syncStatus === "synced") {
+              await expenseRepository.remove(le.id, true).catch(() => {});
+            } else {
+              mergedExpenses.push(le as any);
+            }
+          }
+        }
+        data.expenses = mergedExpenses;
       } else {
         console.warn("Expense hydration deferred/offline:", expensesRes.reason);
-        data.expenses = cached?.expenses ?? [];
+        const localExpenses = await expenseRepository.getAll();
+        data.expenses = localExpenses.filter((e) => !(e as any)._deletedAt) as any;
       }
 
       if (budgetsRes.status === "fulfilled") {
@@ -441,19 +551,28 @@ export const useStore = create<StoreState>((set, get) => {
         data.budgets = cached?.budgets ?? [];
       }
 
-      if (diaryRes.status === "fulfilled") {
-        const entries = [...diaryRes.value];
-        const localOnly = (cached?.diaryEntries ?? []).filter(
-          (entry) =>
-            !isUuid(entry.id) &&
-            !entries.some((m) => m.date === entry.date)
-        );
-        entries.push(...localOnly);
-        entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-        data.diaryEntries = entries;
+      if (diaryRes.status === "fulfilled" && Array.isArray(diaryRes.value)) {
+        const backendDiary = diaryRes.value;
+        for (const de of backendDiary) {
+          await diaryRepository.save(de as any, true).catch(() => {});
+        }
+        const localDiary = await diaryRepository.getAll();
+        const mergedDiary = [...backendDiary];
+        for (const ld of localDiary) {
+          if (!mergedDiary.some((b) => b.id === ld.id || (b.date && ld.date && b.date.slice(0, 10) === ld.date.slice(0, 10))) && !(ld as any)._deletedAt) {
+            if ((ld as any)._syncStatus === "synced") {
+              await diaryRepository.remove(ld.id, true).catch(() => {});
+            } else {
+              mergedDiary.push(ld as any);
+            }
+          }
+        }
+        mergedDiary.sort((a, b) => String(b ? (b?.timestamp || b?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || a?.createdAt || "") : "")));
+        data.diaryEntries = mergedDiary;
       } else {
         console.warn("Diary hydration deferred/offline:", diaryRes.reason);
-        data.diaryEntries = cached?.diaryEntries ?? [];
+        const localDiary = await diaryRepository.getAll();
+        data.diaryEntries = localDiary.filter((d) => !(d as any)._deletedAt) as any;
       }
 
       if (notifsRes.status === "fulfilled") {
@@ -469,14 +588,14 @@ export const useStore = create<StoreState>((set, get) => {
 
       // Merge system config into profile (backend is source of truth)
       let loadedConfig: SystemConfig | null = null;
-      if (sysConfigRes.status === "fulfilled") {
+      if (sysConfigRes.status === "fulfilled" && sysConfigRes.value) {
         loadedConfig = sysConfigRes.value;
         data.profile = {
           ...data.profile,
-          name: loadedConfig.name,
-          email: loadedConfig.email,
-          aiPersonality: loadedConfig.aiPersonality as any,
-          listeningMode: loadedConfig.listeningMode as any,
+          name: loadedConfig.name || data.profile.name,
+          email: loadedConfig.email || data.profile.email,
+          aiPersonality: (loadedConfig.aiPersonality || data.profile.aiPersonality) as any,
+          listeningMode: (loadedConfig.listeningMode || data.profile.listeningMode) as any,
           proactiveModeEnabled: loadedConfig.proactiveModeEnabled,
           maxProactiveNudges: loadedConfig.maxProactiveNudges,
           dailyReviewTime: loadedConfig.dailyReviewTime,
@@ -539,10 +658,8 @@ export const useStore = create<StoreState>((set, get) => {
 
     // Task Actions
     toggleTask: async (taskId) => {
-      const dataStr = localStorage.getItem("lifeos_data");
-      if (!dataStr) return;
       try {
-        const data: FullOSData = JSON.parse(dataStr);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
         const task = data.tasks.find((t) => t.id === taskId);
         if (!task) return;
 
@@ -553,7 +670,11 @@ export const useStore = create<StoreState>((set, get) => {
 
         task.status = task.status === "completed" ? "pending" : "completed";
         localStorage.setItem("lifeos_data", JSON.stringify(data));
-        set({ osData: data });
+        set({ osData: { ...data } });
+
+        await taskRepository.save(task);
+        syncManager.triggerSync();
+
         if (task.status === "completed") {
           syncCompleteTask(taskId);
         } else {
@@ -566,19 +687,18 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     saveTask: async (taskData) => {
-      const dataStr = localStorage.getItem("lifeos_data");
-      if (!dataStr) return;
       try {
-        const data: FullOSData = JSON.parse(dataStr);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
         const isNew = !taskData.id;
+        let savedTask: Task;
         
         if (isNew) {
           const newTask: Task = {
-            id: `task_${Date.now()}`,
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `task_${Date.now()}`,
             title: taskData.title,
-            category: taskData.category,
-            date: taskData.date,
-            time: taskData.time,
+            category: taskData.category || "important-not-urgent",
+            date: taskData.date ? (taskData.date.includes("T") ? taskData.date.split("T")[0] : taskData.date) : getLocalDateString(new Date()),
+            time: taskData.time || "09:00",
             endTime: taskData.endTime,
             description: taskData.description,
             recurType: taskData.recurType || "none",
@@ -588,11 +708,8 @@ export const useStore = create<StoreState>((set, get) => {
             deferReason: taskData.deferReason,
             deferHistory: taskData.deferHistory || []
           };
-          const backendId = await syncCreateTask(newTask);
-          if (backendId) {
-            newTask.id = backendId;
-          }
-          data.tasks.push(newTask);
+          savedTask = newTask;
+          data.tasks = [...data.tasks, newTask];
         } else {
           const existingIndex = data.tasks.findIndex((t) => t.id === taskData.id);
           if (existingIndex !== -1) {
@@ -604,12 +721,20 @@ export const useStore = create<StoreState>((set, get) => {
               ...data.tasks[existingIndex],
               ...taskData
             };
-            syncUpdateTask(taskData.id as string, data.tasks[existingIndex]);
+            savedTask = data.tasks[existingIndex];
+          } else {
+            savedTask = taskData as Task;
           }
         }
         
         localStorage.setItem("lifeos_data", JSON.stringify(data));
-        set({ osData: data });
+        set({ osData: { ...data } });
+
+        if (savedTask) {
+          await taskRepository.save(savedTask);
+          syncManager.triggerSync();
+        }
+
         get().showToast(
           isNew ? `New tactical mission logged.` : `Tactical mission parameters modified.`,
           "success",
@@ -621,10 +746,8 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     deferTask: async (taskId, options) => {
-      const dataStr = localStorage.getItem("lifeos_data");
-      if (!dataStr) return;
       try {
-        const data: FullOSData = JSON.parse(dataStr);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
         const task = data.tasks.find((t) => t.id === taskId);
         if (!task) return;
 
@@ -663,6 +786,9 @@ export const useStore = create<StoreState>((set, get) => {
           rescheduledCount: newCount
         });
 
+        await taskRepository.save(task);
+        syncManager.triggerSync();
+
         const maxLimit = task.maxDeferLimit || 3;
         if (task.rescheduledCount >= maxLimit) {
           const newNotif: SystemNotification = {
@@ -677,7 +803,7 @@ export const useStore = create<StoreState>((set, get) => {
         }
 
         localStorage.setItem("lifeos_data", JSON.stringify(data));
-        set({ osData: data });
+        set({ osData: { ...data } });
         get().showToast(
           `Mission deferred to ${options.newDate} (Deferral #${newCount}).`,
           "success",
@@ -698,10 +824,8 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     deleteTask: async (taskId) => {
-      const dataStr = localStorage.getItem("lifeos_data");
-      if (!dataStr) return;
       try {
-        const data: FullOSData = JSON.parse(dataStr);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
         const task = data.tasks.find((t) => t.id === taskId);
         if (!task) return;
 
@@ -711,8 +835,11 @@ export const useStore = create<StoreState>((set, get) => {
 
         data.tasks = data.tasks.filter((t) => t.id !== taskId);
         syncDeleteTask(taskId);
+        await taskRepository.remove(taskId);
+        syncManager.triggerSync();
+
         localStorage.setItem("lifeos_data", JSON.stringify(data));
-        set({ osData: data });
+        set({ osData: { ...data } });
         get().showToast("Task decommissioned.", "warning", () => get().triggerUndo());
       } catch (err) {
         console.error(err);
@@ -720,366 +847,149 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     // Habits Actions
-  toggleHabit: async (habitId, targetDateStr) => {
-  try {
-    const effectiveDate =
-      targetDateStr ||
-      get().selectedDate ||
-      new Date().toISOString().split("T")[0];
+    toggleHabit: async (habitId, targetDateStr) => {
+      try {
+        const effectiveDate = targetDateStr || get().selectedDate || new Date().toISOString().split("T")[0];
+        const updatedHabit = await habitService.toggle(habitId, effectiveDate);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
 
-    const updatedHabit =
-      await habitService.toggle(
-        habitId,
-        effectiveDate,
-      );
+        if (updatedHabit) {
+          const index = data.habits.findIndex((habit) => habit.id === habitId);
+          if (index !== -1) {
+            data.habits[index] = updatedHabit;
+          } else {
+            data.habits.push(updatedHabit);
+          }
+        }
 
-    const dataStr =
-      localStorage.getItem("lifeos_data");
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: { ...data } });
+        get().showToast("Habit status updated.", "success");
+      } catch (error) {
+        console.error("Failed to toggle habit:", error);
+        get().showToast("Failed to update habit.", "error");
+      }
+    },
 
-    if (!dataStr) return;
+    updateHabitProgress: async (habitId, delta, targetDateStr) => {
+      try {
+        const effectiveDate = targetDateStr || get().selectedDate || new Date().toISOString().split("T")[0];
+        const updatedHabit = await habitService.updateProgress(habitId, effectiveDate, delta);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
 
-    const data: FullOSData =
-      JSON.parse(dataStr);
+        if (updatedHabit) {
+          const index = data.habits.findIndex((habit) => habit.id === habitId);
+          if (index !== -1) {
+            data.habits[index] = updatedHabit;
+          }
+        }
 
-    const index = data.habits.findIndex(
-      (habit) => habit.id === habitId,
-    );
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: { ...data } });
 
-    if (index !== -1) {
-      data.habits[index] = updatedHabit;
-    } else {
-      data.habits.push(updatedHabit);
-    }
+        if (updatedHabit) {
+          const target = updatedHabit.targetValue || 1;
+          const progress = updatedHabit.dailyProgress?.[effectiveDate] || 0;
+          if (progress >= target) {
+            get().showToast(`Target achieved for ${updatedHabit.name}!`, "success");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to update habit progress:", error);
+      }
+    },
 
-    localStorage.setItem(
-      "lifeos_data",
-      JSON.stringify(data),
-    );
-
-    set({
-      osData: data,
-    });
-
-    get().showToast(
-      "Habit status updated.",
-      "success",
-    );
-  } catch (error) {
-    console.error(
-      "Failed to toggle habit:",
-      error,
-    );
-
-    get().showToast(
-      "Failed to update habit.",
-      "error",
-    );
-  }
-},
-
-   updateHabitProgress: async (
-  habitId,
-  delta,
-  targetDateStr,
-) => {
-  try {
-    const effectiveDate =
-      targetDateStr ||
-      get().selectedDate ||
-      new Date().toISOString().split("T")[0];
-
-    const updatedHabit =
-      await habitService.updateProgress(
-        habitId,
-        effectiveDate,
-        delta,
-      );
-
-    const dataStr =
-      localStorage.getItem("lifeos_data");
-
-    if (!dataStr) return;
-
-    const data: FullOSData =
-      JSON.parse(dataStr);
-
-    const index = data.habits.findIndex(
-      (habit) => habit.id === habitId,
-    );
-
-    if (index !== -1) {
-      data.habits[index] = updatedHabit;
-    }
-
-    localStorage.setItem(
-      "lifeos_data",
-      JSON.stringify(data),
-    );
-
-    set({
-      osData: data,
-    });
-
-    const target =
-      updatedHabit.targetValue || 1;
-
-    const progress =
-      updatedHabit.dailyProgress?.[
-        effectiveDate
-      ] || 0;
-
-    if (progress >= target) {
-      get().showToast(
-        `Target achieved for ${updatedHabit.name}!`,
-        "success",
-      );
-    }
-  } catch (error) {
-    console.error(
-      "Failed to update habit progress:",
-      error,
-    );
-  }
-},
     addHabit: async (name, frequency, icon, options) => {
       try {
-        const newHabit =
-          await habitService.create(
-            name,
-            frequency,
-            icon,
-            options,
-          );
+        const newHabit = await habitService.create(name, frequency, icon, options);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
+        const existingIdx = data.habits.findIndex(h => h.id === newHabit.id);
+        if (existingIdx !== -1) {
+          data.habits[existingIdx] = newHabit;
+        } else {
+          data.habits = [...data.habits, newHabit];
+        }
 
-        const dataStr =
-          localStorage.getItem("lifeos_data");
-
-        if (!dataStr) return;
-
-        const data: FullOSData =
-          JSON.parse(dataStr);
-
-        data.habits.push(newHabit);
-
-        localStorage.setItem(
-          "lifeos_data",
-          JSON.stringify(data),
-        );
-
-        set({
-          osData: data,
-        });
-
-        get().showToast(
-          "Routine structure installed.",
-          "success",
-        );
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: { ...data } });
+        get().showToast("Routine structure installed.", "success");
       } catch (error) {
-        console.error(
-          "Failed to create habit:",
-          error,
-        );
-
-        get().showToast(
-          "Failed to create habit.",
-          "error",
-        );
+        console.error("Failed to create habit:", error);
+        get().showToast("Failed to create habit.", "error");
       }
     },
 
     deleteHabit: async (habitId) => {
       try {
         await habitService.delete(habitId);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
+        data.habits = data.habits.filter((habit) => habit.id !== habitId);
 
-        const dataStr =
-          localStorage.getItem("lifeos_data");
-
-        if (!dataStr) return;
-
-        const data: FullOSData =
-          JSON.parse(dataStr);
-
-        data.habits =
-          data.habits.filter(
-            (habit) => habit.id !== habitId,
-          );
-
-        localStorage.setItem(
-          "lifeos_data",
-          JSON.stringify(data),
-        );
-
-        set({
-          osData: data,
-        });
-
-        get().showToast(
-          "Habit routine structure removed.",
-          "warning",
-        );
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        set({ osData: { ...data } });
+        get().showToast("Habit routine structure removed.", "warning");
       } catch (error) {
-        console.error(
-          "Failed to delete habit:",
-          error,
-        );
-
-        get().showToast(
-          "Failed to delete habit.",
-          "error",
-        );
+        console.error("Failed to delete habit:", error);
+        get().showToast("Failed to delete habit.", "error");
       }
     },
 
     // Goals Actions
     addGoal: async (title, targetDate) => {
-  try {
-    const token = get().token;
-
-    const newGoal = await goalService.create(
-      title,
-      targetDate,
-      token
-    );
-
-    const currentData = get().osData;
-    if (!currentData) return;
-
-    const updatedData: FullOSData = {
-      ...currentData,
-      goals: [...currentData.goals, newGoal],
-    };
-
-    set({ osData: updatedData });
-
-    localStorage.setItem(
-      "lifeos_data",
-      JSON.stringify(updatedData)
-    );
-
-    get().showToast(
-      "Strategic milestone goal instituted.",
-      "success"
-    );
-  } catch (error) {
-    console.error("Failed to create goal:", error);
-
-    get().showToast(
-      "Failed to create strategic goal.",
-      "error"
-    );
-  }
-},
-   deleteGoal: async (id) => {
-  try {
-    const token = get().token;
-
-    if (isUuid(id)) {
-      await goalService.remove(id, token);
-    }
-
-    const currentData = get().osData;
-    if (!currentData) return;
-
-    const updatedData: FullOSData = {
-      ...currentData,
-      goals: currentData.goals.filter(
-        (goal) => goal.id !== id
-      ),
-    };
-
-    set({ osData: updatedData });
-
-    localStorage.setItem(
-      "lifeos_data",
-      JSON.stringify(updatedData)
-    );
-
-    get().showToast(
-      "Milestone decommissioned.",
-      "warning"
-    );
-  } catch (error) {
-    console.error("Failed to delete goal:", error);
-
-    get().showToast(
-      "Failed to delete strategic goal.",
-      "error"
-    );
-  }
-},
-      updateGoalProgress: async (id, progress) => {
-  try {
-    const currentData = get().osData;
-    if (!currentData) return;
-
-    const goal = currentData.goals.find(
-      (g) => g.id === id
-    );
-
-    if (!goal) return;
-
-    const originalProgress = goal.progress;
-
-    get().pushUndo(
-      `Update Goal "${goal.title}" progress to ${originalProgress}%`,
-      async () => {
-        await get().updateGoalProgress(
-          id,
-          originalProgress
-        );
-      }
-    );
-
-    let updatedGoal: Goal = {
-      ...goal,
-      progress,
-      status:
-        progress >= 100
-          ? ("completed" as const)
-          : ("active" as const),
-    };
-
-    if (isUuid(id)) {
       try {
-        updatedGoal = await goalService.updateProgress(
-          id,
-          progress,
-          get().token
-        );
+        const newGoal = await goalService.create(title, targetDate);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
+        const existingIdx = data.goals.findIndex(g => g.id === newGoal.id);
+        if (existingIdx !== -1) {
+          data.goals[existingIdx] = newGoal;
+        } else {
+          data.goals = [...data.goals, newGoal];
+        }
+
+        set({ osData: { ...data } });
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        get().showToast("Strategic milestone goal instituted.", "success");
       } catch (error) {
-        console.warn(
-          "Goal progress sync deferred/offline:",
-          error
-        );
+        console.error("Failed to create goal:", error);
+        get().showToast("Failed to create strategic goal.", "error");
       }
-    }
+    },
 
-    const updatedData: FullOSData = {
-      ...currentData,
-      goals: currentData.goals.map((g) =>
-        g.id === id ? updatedGoal : g
-      ),
-    };
+    deleteGoal: async (id) => {
+      try {
+        await goalService.remove(id);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
+        data.goals = data.goals.filter((goal) => goal.id !== id);
 
-    set({ osData: updatedData });
+        set({ osData: { ...data } });
+        localStorage.setItem("lifeos_data", JSON.stringify(data));
+        get().showToast("Milestone decommissioned.", "warning");
+      } catch (error) {
+        console.error("Failed to delete goal:", error);
+        get().showToast("Failed to delete strategic goal.", "error");
+      }
+    },
 
-    localStorage.setItem(
-      "lifeos_data",
-      JSON.stringify(updatedData)
-    );
-
-    get().showToast(
-      "Strategic progression recorded.",
-      "success",
-      () => get().triggerUndo()
-    );
-  } catch (error) {
-    console.error(
-      "Failed to update goal progress:",
-      error
-    );
-  }
-},
+    updateGoalProgress: async (id, progress) => {
+      try {
+        const updatedGoal = await goalService.updateProgress(id, progress);
+        const data = getOSDataFromStoreOrLocalStorage(set, get);
+        const goalIndex = data.goals.findIndex((g) => g.id === id);
+        if (goalIndex !== -1) {
+          if (updatedGoal) {
+            data.goals[goalIndex] = updatedGoal;
+          } else {
+            data.goals[goalIndex].progress = progress;
+            if (progress >= 100) data.goals[goalIndex].status = "completed";
+          }
+          localStorage.setItem("lifeos_data", JSON.stringify(data));
+          set({ osData: { ...data } });
+          get().showToast("Strategic progression recorded.", "success");
+        }
+      } catch (error) {
+        console.error("Failed to update goal progress:", error);
+      }
+    },
    
     // Profile & Financials
     saveProfile: async (profileData) => {
@@ -1235,7 +1145,8 @@ export const useStore = create<StoreState>((set, get) => {
 
       try {
         const storedConversationId = localStorage.getItem("piggy_conversation_id");
-        const res = await fetch("/api/piggy/chat", {
+        const baseUrl = getApiBaseUrl();
+        const res = await fetch(`${baseUrl}/piggy/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1414,7 +1325,8 @@ export const useStore = create<StoreState>((set, get) => {
     logFocusSession: async (minutes, score) => {
       try {
         const todayStr = get().selectedDate || new Date().toISOString().split("T")[0];
-        const res = await fetch("/api/piggy/focus-log", {
+        const baseUrl = getApiBaseUrl();
+        const res = await fetch(`${baseUrl}/piggy/focus-log`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1742,17 +1654,15 @@ export const useStore = create<StoreState>((set, get) => {
                 innerData.diaryEntries = innerData.diaryEntries || [];
                 innerData.diaryEntries = innerData.diaryEntries.filter(e => e.date !== entry.date || e.id === entry.id);
                 innerData.diaryEntries.push(entry);
-                innerData.diaryEntries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+                innerData.diaryEntries.sort((a, b) => String(b ? (b?.timestamp || b?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || a?.createdAt || "") : "")));
                 localStorage.setItem("lifeos_data", JSON.stringify(innerData));
                 set({ osData: innerData });
               }
             });
-            if (isUuid(entryId)) {
-              try {
-                await diaryService.delete(entryId);
-              } catch (syncErr) {
-                console.warn("Diary delete deferred/offline:", syncErr);
-              }
+            try {
+              await diaryService.delete(entryId);
+            } catch (syncErr) {
+              console.warn("Diary delete deferred/offline:", syncErr);
             }
             data.diaryEntries = data.diaryEntries.filter(e => e.id !== entryId);
             localStorage.setItem("lifeos_data", JSON.stringify(data));
@@ -1767,3 +1677,6 @@ export const useStore = create<StoreState>((set, get) => {
   };
 });
 
+if (typeof window !== "undefined") {
+  (window as any).useStore = useStore;
+}

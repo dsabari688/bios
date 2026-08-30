@@ -62,7 +62,7 @@ export function resolveEntityMatch(
       return { id: item.id, title, score };
     })
     .filter((c) => c.score > 0.3)
-    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+    .sort((a, b) => b.score - a.score || String(a?.title || "").localeCompare(String(b?.title || "")));
 
   if (scored.length === 0) {
     return { resolved: false };

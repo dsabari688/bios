@@ -6,7 +6,8 @@ import type {
 } from "./habit.types.js";
 
 export const habitRepository = {
-  async create(input: CreateHabitInput) {
+  async create(input: CreateHabitInput & { id?: string }) {
+    const id = typeof input.id === "string" && input.id.trim() !== "" ? input.id : randomUUID();
     const result = await pool.query(
       `
       INSERT INTO "habit" (
@@ -39,10 +40,20 @@ export const habitRepository = {
         '{}'::jsonb,
         $9
       )
+      ON CONFLICT ("id") DO UPDATE SET
+        "name" = EXCLUDED."name",
+        "frequency" = EXCLUDED."frequency",
+        "icon" = EXCLUDED."icon",
+        "category" = EXCLUDED."category",
+        "targetValue" = EXCLUDED."targetValue",
+        "unit" = EXCLUDED."unit",
+        "stepIncrement" = EXCLUDED."stepIncrement",
+        "notes" = EXCLUDED."notes",
+        "updatedAt" = NOW()
       RETURNING *
       `,
       [
-        randomUUID(),
+        id,
         input.name,
         input.frequency,
         input.icon ?? "book-open",
@@ -158,6 +169,14 @@ export const habitRepository = {
   },
 
   async delete(id: string) {
+    await pool.query(`CREATE TABLE IF NOT EXISTS "deleted_records" ("id" TEXT PRIMARY KEY, "entity" TEXT NOT NULL, "entityId" TEXT NOT NULL, "deletedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(
+      `INSERT INTO "deleted_records" ("id", "entity", "entityId", "deletedAt")
+       VALUES ($1, 'habit', $2, NOW())
+       ON CONFLICT ("id") DO UPDATE SET "deletedAt" = NOW()`,
+      [`del-habit-${id}`, id]
+    );
+
     const result = await pool.query(
       `
       DELETE FROM "habit"

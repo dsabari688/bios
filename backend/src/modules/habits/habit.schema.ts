@@ -67,6 +67,10 @@ export function validateCreateHabit(
   }
 
   return {
+    id:
+      typeof input.id === "string" && input.id.trim().length > 0
+        ? input.id.trim()
+        : undefined,
     name: input.name.trim(),
     frequency: input.frequency as CreateHabitInput["frequency"],
     icon:

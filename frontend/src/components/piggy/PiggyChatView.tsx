@@ -29,13 +29,12 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
   const { showToast, osData, saveProfile, clearChatHistory } = useStore();
   // 👇 THE MAGIC LINK: Uses global data if it exists, falls back to local if not
   const activeHistory = osData?.chatHistory || chatHistory; 
-  const activationWord = (osData?.profile?.activationWord || "piggy").toLowerCase();
 
   const [inputText, setInputText] = useState("");
   const [piggyState, setPiggyState] = useState<"IDLE" | "PASSIVE_LISTENING" | "LISTENING" | "THINKING" | "SPEAKING">("IDLE");
   const [isWakeWordMode, setIsWakeWordMode] = useState(false);
   const [micGranted, setMicGranted] = useState<boolean | null>(null);
-  const [memoriesCount, setMemoriesCount] = useState<number | null>(null);
+  const [memoriesCount, setMemoriesCount] = useState<number>(0);
   const [customWordInput, setCustomWordInput] = useState(activationWord);
 
   useEffect(() => {
@@ -43,10 +42,10 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
   }, [activationWord]);
 
   useEffect(() => {
-    if (token) {
-      fetch("/api/piggy/dashboard", {
-        headers: { "Authorization": `Bearer ${token}` }
-      })
+    const baseUrl = getApiBaseUrl();
+    fetch(`${baseUrl}/piggy/dashboard`, {
+      headers: { ...(token ? { "Authorization": `Bearer ${token}` } : {}) }
+    })
         .then(res => res.json())
         .then(data => {
           if (data.success && data.aiMemory) {
@@ -54,7 +53,6 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
           }
         })
         .catch(err => console.error("Error fetching memory facts count:", err));
-    }
   }, [token]);
 
   const isWakeWordModeRef = useRef(false);

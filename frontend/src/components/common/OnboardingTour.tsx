@@ -14,7 +14,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ isOpen, onClose,
 
   const tourSteps = [
     {
-      title: `Welcome to LifeOS, ${userName.split(" ")[0]}!`,
+      title: `Welcome to LifeOS, ${(userName || "User").split(" ")[0]}!`,
       description: "I am Piggy (and J.A.R.V.I.S.), your cognitive assistant. Let's take a quick tour of your new command center.",
       icon: Sparkles,
       color: "text-amber-500 bg-amber-50",

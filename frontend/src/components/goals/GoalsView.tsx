@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Target, Calendar, Plus, ShieldCheck, Trash2, Sparkles, X, Loader2, AlertTriangle } from "lucide-react";
 import { Goal } from "../../types";
 import { useStore } from "../../store/useStore";
+import { getApiBaseUrl } from "../../api/client";
 
 interface GoalsViewProps {
   goals: Goal[];
@@ -20,7 +21,8 @@ export const GoalsView: React.FC<GoalsViewProps> = ({ goals, onAddGoal, onDelete
   const getForecast = async (goalId: string, goalTitle: string) => {
     setLoadingForecastId(goalId);
     try {
-      const res = await fetch("/api/predictive-outcomes", {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/predictive-outcomes`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",

@@ -18,7 +18,8 @@ import { DailyReviewModal } from "../components/reviews/DailyReviewModal";
 import { SmartPlannerModal } from "../components/piggy/SmartPlannerModal";
 import { WeeklyReviewModal } from "../components/reviews/WeeklyReviewModal";
 import { OnboardingTour } from "../components/common/OnboardingTour";
-import { ErrorBoundary } from "../components/common/ErrorBoundary"; // 🌟 ADDED: Our new safety net!
+import { ErrorBoundary } from "../components/common/ErrorBoundary";
+import { SyncStatusBadge } from "../components/common/SyncStatusBadge";
 
 // Lazy views split
 const DashboardView = lazy(() => import("../components/dashboard/DashboardView").then(m => ({ default: m.DashboardView })));
@@ -135,10 +136,7 @@ export default function App() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("theme");
     if (saved === "light" || saved === "dark") return saved;
-    if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      return "dark";
-    }
-    return "light";
+    return "dark";
   });
 
   useEffect(() => {
@@ -741,6 +739,8 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
+              {/* Real-Time Offline-First Sync Telemetry Badge */}
+              <SyncStatusBadge />
               {/* Theme quick toggle */}
               <button
                 type="button"

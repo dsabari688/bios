@@ -3,7 +3,8 @@ import { pool } from "../../db/postgres.js";
 import type { CreateMoodInput } from "./mood.types.js";
 
 export const moodRepository = {
-  async create(input: CreateMoodInput, score: number) {
+  async create(input: CreateMoodInput & { id?: string }, score: number) {
+    const id = typeof input.id === "string" && input.id.trim() !== "" ? input.id : randomUUID();
     const result = await pool.query(
       `
       INSERT INTO "mood" (
@@ -13,6 +14,11 @@ export const moodRepository = {
         "note"
       )
       VALUES ($1, $2, $3, $4)
+      ON CONFLICT ("id") DO UPDATE SET
+        "mood" = EXCLUDED."mood",
+        "score" = EXCLUDED."score",
+        "note" = EXCLUDED."note",
+        "updatedAt" = NOW()
       RETURNING
         "id",
         "mood",
@@ -23,7 +29,7 @@ export const moodRepository = {
         "updatedAt"
       `,
       [
-        randomUUID(),
+        id,
         input.mood,
         score,
         input.note ?? null,

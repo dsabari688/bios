@@ -6,3 +6,19 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Electron build artifacts
+dist-electron-build/
+release-win/
+
+# Electron generated builds
+frontend/release-electron/
+frontend/release-win/
+dist-electron-build/
+release-win/
+release-electron/
+*.tmp
+*.exe
+win-unpacked*
+# Temporary debug screenshots
+*.png

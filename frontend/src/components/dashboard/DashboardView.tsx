@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 import { formatTimeRange, formatTo12Hour, getLocalDateString, formatDisplayDate, getRelativeDateLabel } from "../../lib/timeUtils";
 import { useStore } from "../../store/useStore";
 import { UniversalDateNavigator } from "../common/UniversalDateNavigator";
+import { getApiBaseUrl } from "../../api/client";
 
 function getEndTimeString(startTime: string, endTime?: string): string {
   if (endTime) return endTime;
@@ -35,11 +36,11 @@ const TaskCountdownTimer: React.FC<{ task: Task }> = ({ task }) => {
       const now = new Date();
       const todayStr = now.toISOString().split("T")[0];
       
-      const [sh, sm] = task.time.split(":");
+      const [sh, sm] = (task.time || "00:00").split(":");
       const startDateTime = new Date(`${task.date || todayStr}T${sh || "00"}:${sm || "00"}:00`);
 
-      const endStr = task.endTime || getEndTimeString(task.time, task.endTime);
-      const [eh, em] = endStr.split(":");
+      const endStr = task.endTime || getEndTimeString(task.time || "00:00", task.endTime);
+      const [eh, em] = (endStr || "00:00").split(":");
       const endDateTime = new Date(`${task.date || todayStr}T${eh || "00"}:${em || "00"}:00`);
 
       const totalDuration = endDateTime.getTime() - startDateTime.getTime();
@@ -162,11 +163,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const isSelectedDateToday = selectedDate === todayStr;
 
   React.useEffect(() => {
-    if (!token) return;
-    const headers = { "Authorization": `Bearer ${token}` };
+    const headers = { ...(token ? { "Authorization": `Bearer ${token}` } : {}) };
+    const baseUrl = getApiBaseUrl();
 
     // Fetch daily brief warnings and updates
-    fetch("/api/jarvis/daily-brief", { headers })
+    fetch(`${baseUrl}/jarvis/daily-brief`, { headers })
       .then(res => res.json())
       .then(data => {
         if (data.insights) setDailyBrief(data.insights);
@@ -174,7 +175,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .catch(err => console.error("Error fetching daily brief:", err));
 
     // Fetch morning brief greeting
-    fetch("/api/jarvis/morning-brief", { headers })
+    fetch(`${baseUrl}/jarvis/morning-brief`, { headers })
       .then(res => res.json())
       .then(data => {
         if (data.briefText) {
@@ -190,7 +191,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .catch(err => console.error("Error fetching morning brief:", err));
 
     // Proactively trigger habit nudges on load
-    fetch("/api/jarvis/trigger-nudge", { method: "POST", headers })
+    fetch(`${baseUrl}/jarvis/trigger-nudge`, { method: "POST", headers })
       .then(res => res.json())
       .then(data => {
         if (data.success && onNudgeTriggered) {
@@ -201,36 +202,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [token]);
 
   // Tasks for the currently selected date
-  const dayTasks = tasks.filter(t => t.date === selectedDate);
-  const sortedDayTasks = [...dayTasks].sort((a, b) => a.time.localeCompare(b.time));
-  const dayCompleted = dayTasks.filter(t => t.status === "completed").length;
-  const dayPending = dayTasks.filter(t => t.status === "pending").length;
+  const dayTasks = tasks.filter(t => {
+    const taskDateStr = t.date ? (t.date.includes("T") ? t.date.split("T")[0] : t.date) : "";
+    return taskDateStr === selectedDate;
+  });
+  const sortedDayTasks = [...dayTasks].sort((a, b) => {
+    const aTime = String(a?.time || "09:00");
+    const bTime = String(b?.time || "09:00");
+    return aTime.localeCompare(bTime);
+  });
+  const dayCompleted = dayTasks.filter(t => t?.status === "completed").length;
+  const dayPending = dayTasks.filter(t => t?.status === "pending").length;
   const dayTotal = dayTasks.length;
   const dayCompletionRate = dayTotal > 0 ? Math.round((dayCompleted / dayTotal) * 100) : 0;
 
   // System-wide stats
   const totalTasks = tasks.length;
-  const totalCompletedTasks = tasks.filter(t => t.status === "completed").length;
-  const totalPendingTasks = tasks.filter(t => t.status === "pending").length;
+  const totalCompletedTasks = tasks.filter(t => t?.status === "completed").length;
+  const totalPendingTasks = tasks.filter(t => t?.status === "pending").length;
   const taskCompletionRate = totalTasks > 0 ? Math.round((totalCompletedTasks / totalTasks) * 100) : 0;
 
   const totalHabitsCount = habits.length;
-  const loggedHabitsCount = habits.filter(h => h.logs.includes(todayStr)).length;
+  const loggedHabitsCount = habits.filter(h => Array.isArray(h?.logs) && h.logs.includes(todayStr)).length;
   const habitCompletionRate = totalHabitsCount > 0 ? Math.round((loggedHabitsCount / totalHabitsCount) * 100) : 0;
 
-  const highestStreak = habits.length > 0 ? Math.max(...habits.map(h => h.streak)) : 0;
+  const highestStreak = habits.length > 0 ? Math.max(...habits.map(h => h?.streak || 0)) : 0;
 
   // Synthesize dynamic Life Score
   const goals = data.goals || [];
   const goalsCompletedRate = goals.length > 0 
-    ? Math.round(goals.reduce((acc, g) => acc + g.progress, 0) / goals.length) 
+    ? Math.round(goals.reduce((acc, g) => acc + (g?.progress || 0), 0) / goals.length) 
     : 0;
   const taskMetricRate = dayTotal > 0 ? dayCompletionRate : (totalTasks > 0 ? Math.round((totalCompletedTasks / totalTasks) * 100) : 0);
   const lifeScore = Math.round((taskMetricRate * 0.4) + (habitCompletionRate * 0.4) + (goalsCompletedRate * 0.2));
 
   // Get today's actual sequence progress
-  const todayTasks = tasks.filter(t => t.date === todayStr)
-    .sort((a, b) => a.time.localeCompare(b.time));
+  const todayTasks = tasks.filter(t => t?.date === todayStr)
+    .sort((a, b) => {
+      const aTime = String(a?.time || "09:00");
+      const bTime = String(b?.time || "09:00");
+      return aTime.localeCompare(bTime);
+    });
   const todayDone = todayTasks.filter(t => t.status === 'completed').length;
   const todayProgress = todayTasks.length > 0 ? Math.round((todayDone / todayTasks.length) * 100) : 0;
 
@@ -306,8 +318,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-700 font-medium">
             {dailyBrief.map((insight, idx) => (
               <div key={idx} className="flex gap-2.5 items-start bg-white p-3 rounded-xl border border-slate-100 shadow-2xs">
-                <span className="shrink-0">{insight.split(" ")[0]}</span>
-                <span>{insight.substring(insight.indexOf(" ") + 1)}</span>
+                <span className="shrink-0">{insight ? insight.split(" ")[0] : ""}</span>
+                <span>{insight ? insight.substring(insight.indexOf(" ") + 1) : ""}</span>
               </div>
             ))}
           </div>
@@ -347,7 +359,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="space-y-1">
               <h3 className="font-display font-bold text-lg text-slate-800">System Performance Index</h3>
               <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-sans">
-                {profile.name.split(" ")[0]}, your aggregated parameters show a highly synced mental focus. Keep committing tasks to maintain status levels.
+                {(profile?.name || "User").split(" ")[0]}, your aggregated parameters show a highly synced mental focus. Keep committing tasks to maintain status levels.
               </p>
             </div>
           </div>
@@ -406,7 +418,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="my-4 border-l-2 border-amber-500/40 pl-3">
             <p className="text-xs text-slate-300 italic leading-relaxed font-sans">
-              "{latestAssistantMsg?.content || `${profile.name.split(" ")[0]}, systems are optimal. Awaiting your next command.`}"
+              "{latestAssistantMsg?.content || `${(profile?.name || "User").split(" ")[0]}, systems are optimal. Awaiting your next command.`}"
             </p>
           </div>
 
@@ -550,9 +562,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             ) : (
               sortedDayTasks.map((task) => {
                 const isCompleted = task.status === "completed";
-                const isCritical = task.category === "urgent-important";
+                const isCritical = task.category === "urgent-important" || task.category === "important-urgent";
                 const isImportant = task.category === "important-not-urgent";
-                const isUrgentMinor = task.category === "urgent-not-important";
+                const isUrgentMinor = task.category === "urgent-not-important" || task.category === "not-important-urgent";
 
                 let priorityLabel = "Low";
                 let priorityColor = "bg-slate-50 text-slate-500 border-slate-100";
@@ -752,7 +764,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div key={task.id} className="flex items-center gap-2 text-xs">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${task.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                     <span className={`font-medium ${task.status === 'completed' ? 'text-emerald-600 font-bold' : 'text-slate-600'}`}>
-                      {task.title.length > 22 ? task.title.substring(0, 22) + "..." : task.title}
+                      {(task.title || "").length > 22 ? (task.title || "").substring(0, 22) + "..." : (task.title || "")}
                     </span>
                     <span className={`ml-auto font-mono text-[10px] ${task.status === 'completed' ? 'text-emerald-500' : 'text-amber-500'}`}>
                       {task.status === 'completed' ? 'Complete' : 'Pending'}

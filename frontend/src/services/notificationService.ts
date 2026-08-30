@@ -1,43 +1,32 @@
-import { notificationsApi } from "../api/notifications.api";
+import { notificationRepository } from "../db/repositories/notificationRepository";
+import { syncManager } from "../sync/syncManager";
 import type { SystemNotification } from "../types";
 
-function mapNotificationType(
-  backendType: string,
-): SystemNotification["type"] {
-  if (backendType === "habit_reminder") {
-    return "reminder";
-  }
-
-  if (backendType === "streak") {
-    return "streak";
-  }
-
-  if (backendType === "budget") {
-    return "budget";
-  }
-
-  return "warning";
-}
-
 export const notificationService = {
-  async getSystemNotifications(): Promise<
-    SystemNotification[]
-  > {
-    const rows =
-      await notificationsApi.getAll(50);
-
-    return rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      message: row.message,
-      timestamp: row.createdAt,
-      type: mapNotificationType(row.type),
-      read: row.read,
-    }));
+  async getSystemNotifications(): Promise<SystemNotification[]> {
+    return notificationRepository.getAll() as Promise<SystemNotification[]>;
   },
 
-  async markRead(id: string) {
-    return notificationsApi.markRead(id);
+  async markRead(id: string): Promise<void> {
+    const all = await notificationRepository.getAll();
+    const existing = all.find((n) => n.id === id);
+    if (!existing) return;
+
+    await notificationRepository.save({
+      ...existing,
+      read: true,
+    });
+    syncManager.triggerSync();
+  },
+
+  async addNotification(notif: Omit<SystemNotification, "id">): Promise<SystemNotification> {
+    const newNotif: SystemNotification = {
+      ...notif,
+      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `notif-${Date.now()}`,
+    };
+
+    const saved = await notificationRepository.save(newNotif);
+    syncManager.triggerSync();
+    return saved;
   },
 };
-

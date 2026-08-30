@@ -1,57 +1,84 @@
-import type { Habit } from "../../types";
-
-const STORAGE_KEY = "lifeos_habits_cache";
+import { db } from "../database";
+import type { LocalHabit } from "../schema";
+import { syncQueue } from "../../sync/syncQueue";
 
 export const habitRepository = {
-  getAll(): Habit[] {
-    const raw =
-      localStorage.getItem(STORAGE_KEY);
-
-    if (!raw) {
-      return [];
-    }
-
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
+  async getAll(): Promise<LocalHabit[]> {
+    return db.habits
+      .filter((habit) => !habit._deletedAt)
+      .toArray();
   },
 
-  saveAll(habits: Habit[]) {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(habits),
-    );
+  async getById(id: string): Promise<LocalHabit | undefined> {
+    const habit = await db.habits.get(id);
+    return habit && !habit._deletedAt ? habit : undefined;
   },
 
-  save(habit: Habit) {
-    const habits = this.getAll();
+  async save(habit: LocalHabit, isRemote: boolean = false): Promise<LocalHabit> {
+    const now = new Date().toISOString();
+    const isNew = !(await db.habits.get(habit.id));
 
-    const index = habits.findIndex(
-      (item) => item.id === habit.id,
-    );
+    const localHabit: LocalHabit = {
+      ...habit,
+      _updatedAt: habit._updatedAt || now,
+      _syncStatus: isRemote ? "synced" : "pending",
+      _version: (habit._version || 0) + 1,
+    };
 
-    if (index === -1) {
-      habits.push(habit);
+    await db.habits.put(localHabit);
+
+    if (!isRemote) {
+      await syncQueue.enqueue(
+        "habit",
+        localHabit.id,
+        isNew ? "create" : "update",
+        localHabit
+      );
+    }
+
+    return localHabit;
+  },
+
+  async saveAll(habits: LocalHabit[], isRemote: boolean = false): Promise<void> {
+    const now = new Date().toISOString();
+    const prepared: LocalHabit[] = habits.map((h) => ({
+      ...h,
+      _updatedAt: h._updatedAt || now,
+      _syncStatus: isRemote ? "synced" : "pending",
+    }));
+    await db.habits.bulkPut(prepared);
+  },
+
+  async remove(id: string, isRemote: boolean = false): Promise<void> {
+    const now = new Date().toISOString();
+    const existing = await db.habits.get(id);
+    if (!existing) return;
+
+    if (isRemote) {
+      await db.habits.delete(id);
     } else {
-      habits[index] = habit;
+      const tombstoned: LocalHabit = {
+        ...existing,
+        _deletedAt: now,
+        _syncStatus: "pending",
+        _updatedAt: now,
+      };
+      await db.habits.put(tombstoned);
+      await syncQueue.enqueue("habit", id, "delete", { id, deletedAt: now });
     }
-
-    this.saveAll(habits);
-
-    return habit;
   },
 
-  remove(id: string) {
-    const habits = this
-      .getAll()
-      .filter((habit) => habit.id !== id);
-
-    this.saveAll(habits);
+  async markSynced(id: string, serverData?: Partial<LocalHabit>): Promise<void> {
+    const existing = await db.habits.get(id);
+    if (!existing) return;
+    await db.habits.update(id, {
+      ...serverData,
+      _syncStatus: "synced",
+      _updatedAt: new Date().toISOString(),
+    });
   },
 
-  clear() {
-    localStorage.removeItem(STORAGE_KEY);
+  async clear(): Promise<void> {
+    await db.habits.clear();
   },
 };

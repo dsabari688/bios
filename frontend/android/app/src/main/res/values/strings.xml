@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BIOS</string>
+    <string name="title_activity_main">BIOS</string>
+    <string name="package_name">com.bios.app</string>
+    <string name="custom_url_scheme">com.bios.app</string>
+</resources>

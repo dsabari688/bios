@@ -67,10 +67,12 @@ export interface Habit {
   notes?: string;
 }
 
+export type ExpenseCategory = 'food' | 'transportation' | 'shopping' | 'education' | 'healthcare' | 'entertainment' | 'misc';
+
 export interface Expense {
   id: string;
   amount: number;
-  category: 'food' | 'transportation' | 'shopping' | 'education' | 'healthcare' | 'entertainment' | 'misc';
+  category: ExpenseCategory;
   note: string;
   date: string; // YYYY-MM-DD
   isImpulsive?: boolean;

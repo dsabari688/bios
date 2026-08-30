@@ -10,6 +10,7 @@ export type HabitCategory =
   | "general";
 
 export interface CreateHabitInput {
+  id?: string;
   name: string;
   frequency: HabitFrequency;
   icon?: string;

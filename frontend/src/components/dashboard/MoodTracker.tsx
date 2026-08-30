@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Smile, CheckCircle2, History, ChevronLeft, ChevronRight, TrendingUp, Sparkles, Brain } from "lucide-react";
+import { getApiBaseUrl } from "../../api/client";
+import { syncQueue } from "../../sync/syncQueue";
+import { syncManager } from "../../sync/syncManager";
 
 interface MoodTrackerProps {
   token?: string | null;
@@ -146,7 +149,8 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
     const loadHistory = async (): Promise<MoodEntry[]> => {
       // 1. Try the real backend first (source of truth)
       try {
-        const res = await fetch("/api/moods");
+        const baseUrl = getApiBaseUrl();
+        const res = await fetch(`${baseUrl}/moods`);
         if (!res.ok) throw new Error(`Backend responded ${res.status}`);
         const json = await res.json();
         if (!json?.success || !Array.isArray(json.data)) throw new Error("Invalid payload");
@@ -164,15 +168,47 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
           .sort((a: { ts: number }, b: { ts: number }) => b.ts - a.ts)
           .map((item: { entry: MoodEntry }) => item.entry);
 
+        // Read local entries to merge with remote
+        const localHistoryStr = localStorage.getItem("lifeos_mood_history");
+        let localEntries: MoodEntry[] = [];
+        if (localHistoryStr) {
+          try { localEntries = JSON.parse(localHistoryStr); } catch {}
+        }
+
+        // Combine local and remote entries (local entries prioritized)
+        const combined = [...localEntries, ...mapped];
+        const deduplicated: MoodEntry[] = [];
+        const seenIds = new Set<string>();
+        const seenKeys = new Set<string>();
+
+        for (const item of combined) {
+          const key = `${item.createdAt}_${item.mood}_${item.note}`;
+          if (!seenIds.has(item.id) && !seenKeys.has(key)) {
+            seenIds.add(item.id);
+            seenKeys.add(key);
+            deduplicated.push(item);
+          }
+        }
+
         // Mirror to localStorage so the offline fallback stays current
-        localStorage.setItem("lifeos_mood_history", JSON.stringify(mapped));
-        return mapped;
+        localStorage.setItem("lifeos_mood_history", JSON.stringify(deduplicated));
+        return deduplicated;
       } catch {
         // 2. Fallback: localStorage (offline mode)
         const localHistory = localStorage.getItem("lifeos_mood_history");
         if (localHistory) {
           try {
-            return JSON.parse(localHistory);
+            const raw: MoodEntry[] = JSON.parse(localHistory);
+            const deduplicated: MoodEntry[] = [];
+            const seenKeys = new Set<string>();
+            for (const item of raw) {
+              const key = `${item.createdAt}_${item.mood}_${item.note}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                deduplicated.push(item);
+              }
+            }
+            return deduplicated;
           } catch (e) {
             console.error("Failed to parse mood history:", e);
           }
@@ -203,46 +239,73 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
     };
   }, [saved]);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSaveMood = async () => {
-    if (!selectedMood) return;
+    if (!selectedMood || isSubmitting) return;
+    setIsSubmitting(true);
 
-    const payload = {
-      mood: selectedMood,
-      note: note.trim() || "State optimized"
-    };
-
-    let syncedToBackend = false;
     try {
-      const res = await fetch("/api/moods", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(payload)
-      });
-      syncedToBackend = res.ok;
-    } catch (err) {
-      console.warn("API sync deferred/offline:", err);
-    }
+      const moodNote = note.trim() || "State optimized";
+      const now = new Date();
+      const newId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `mood_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    if (!syncedToBackend) {
-      // Offline fallback: store locally only; will not appear in backend
       const newEntry: MoodEntry = {
-        id: `mood_${Date.now()}`,
+        id: newId,
         mood: selectedMood,
-        note: payload.note,
-        createdAt: formatMoodDate(new Date())
+        note: moodNote,
+        createdAt: formatMoodDate(now)
       };
-      const updatedHistory = [newEntry, ...history];
+
+      // 1. Update UI state and localStorage immediately
+      const updatedHistory = [newEntry, ...history.filter(h => h.id !== newId)];
       setHistory(updatedHistory);
       localStorage.setItem("lifeos_mood_history", JSON.stringify(updatedHistory));
       setTodayMood(newEntry);
-    }
 
-    setNote("");
-    setSelectedMood("");
-    setSaved(prev => !prev);
+      // 2. Direct API call with explicit ID (upsert)
+      try {
+        const baseUrl = getApiBaseUrl();
+        await fetch(`${baseUrl}/moods`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { "Authorization": `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            id: newId,
+            mood: selectedMood,
+            note: moodNote
+          })
+        });
+      } catch (err) {
+        console.warn("Direct mood save deferred:", err);
+      }
+
+      // 3. Queue for sync manager
+      try {
+        await syncQueue.enqueue("mood", newEntry.id, "create", {
+          id: newEntry.id,
+          mood: selectedMood,
+          note: moodNote,
+          loggedAt: now.toISOString(),
+          createdAt: now.toISOString()
+        });
+        syncManager.triggerSync();
+      } catch (e) {
+        console.warn("Failed to enqueue mood sync:", e);
+      }
+
+      setNote("");
+      setSelectedMood("");
+      setSaved(prev => !prev);
+    } catch (err) {
+      console.warn("Failed to save mood:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -463,11 +526,13 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
                     />
                     <div>
                       <button
+                        type="button"
+                        disabled={isSubmitting}
                         onClick={handleSaveMood}
-                        className="px-5 py-2.5 bg-slate-900 dark:bg-slate-800 dark:hover:bg-slate-700 border border-transparent hover:bg-slate-800 text-white font-display font-bold text-[11px] uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer max-w-fit active:scale-[0.98]"
+                        className="px-5 py-2.5 bg-slate-900 dark:bg-slate-800 dark:hover:bg-slate-700 border border-transparent hover:bg-slate-800 text-white font-display font-bold text-[11px] uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer max-w-fit active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5 text-amber-500" />
-                        Log Mind State
+                        {isSubmitting ? "Logging State..." : "Log Mind State"}
                       </button>
                     </div>
                   </div>
@@ -489,9 +554,9 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
               </div>
 
               {/* Beautiful Sliding Tab Switch */}
-              <div className="relative flex p-0.5 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-xl mb-3">
+              <div className="relative flex p-0.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl mb-3">
                 <div
-                  className="absolute top-0.5 bottom-0.5 left-0.5 bg-white dark:bg-slate-850 rounded-lg shadow-xs transition-all duration-300"
+                  className="absolute top-0.5 bottom-0.5 left-0.5 bg-white dark:bg-slate-800 rounded-lg shadow-xs transition-all duration-300"
                   style={{
                     width: "calc(50% - 2px)",
                     transform: historyTab === "today" ? "translateX(0)" : "translateX(100%)",
@@ -501,7 +566,7 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
                   type="button"
                   onClick={() => setHistoryTab("today")}
                   className={`relative z-10 flex-1 py-1.5 text-center text-[10px] font-mono font-black uppercase tracking-wider transition-colors cursor-pointer ${
-                    historyTab === "today" ? "text-slate-800 dark:text-slate-200" : "text-slate-400 dark:text-slate-500"
+                    historyTab === "today" ? "text-amber-600 dark:text-amber-400 font-bold" : "text-slate-500 dark:text-slate-400"
                   }`}
                 >
                   Current Date
@@ -510,7 +575,7 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
                   type="button"
                   onClick={() => setHistoryTab("past")}
                   className={`relative z-10 flex-1 py-1.5 text-center text-[10px] font-mono font-black uppercase tracking-wider transition-colors cursor-pointer ${
-                    historyTab === "past" ? "text-slate-800 dark:text-slate-200" : "text-slate-400 dark:text-slate-500"
+                    historyTab === "past" ? "text-amber-600 dark:text-amber-400 font-bold" : "text-slate-500 dark:text-slate-400"
                   }`}
                 >
                   Past History

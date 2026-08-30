@@ -37,12 +37,15 @@ export const taskRepository = {
 
   async findAll() {
     const result = await pool.query(`
-      SELECT *
+      SELECT *, to_char("date" AT TIME ZONE 'UTC', 'YYYY-MM-DD') as "dateStr"
       FROM "task"
       ORDER BY "date" ASC
     `);
 
-    return result.rows;
+    return result.rows.map((r: any) => {
+      if (r.dateStr) { r.date = r.dateStr; delete r.dateStr; }
+      return r;
+    });
   },
 
   async findToday(start: Date, end: Date) {

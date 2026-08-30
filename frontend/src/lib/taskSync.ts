@@ -24,17 +24,28 @@ export function combineDateTime(date: string, time?: string): string | null {
 }
 
 function splitDateTime(iso: string): { date: string; time: string } {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) {
+  if (!iso) {
     const today = new Date();
     return {
       date: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-      time: "09:00"
+      time: "09:00",
     };
   }
+
+  // Extract clean YYYY-MM-DD directly from ISO string to prevent timezone offset shifts
+  const dateMatch = String(iso).match(/^(\d{4}-\d{2}-\d{2})/);
+  const dateStr = dateMatch
+    ? dateMatch[1]
+    : `${new Date().getFullYear()}-${pad(new Date().getMonth() + 1)}-${pad(new Date().getDate())}`;
+
+  const d = new Date(iso);
+  const timeStr = !isNaN(d.getTime())
+    ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    : "09:00";
+
   return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    date: dateStr,
+    time: timeStr,
   };
 }
 
@@ -149,24 +160,24 @@ export async function syncCreateTask(task: Task): Promise<string | null> {
 }
 
 export function syncUpdateTask(taskId: string, task: Partial<Task>): void {
-  if (!isBackendTaskId(taskId)) return;
+  if (!taskId) return;
   void tasksApi
     .update(taskId, taskToBackendPayload(task))
     .catch(() => undefined);
 }
 
 export function syncCompleteTask(taskId: string): void {
-  if (!isBackendTaskId(taskId)) return;
+  if (!taskId) return;
   void tasksApi.complete(taskId).catch(() => undefined);
 }
 
 export function syncSetTaskStatus(taskId: string, status: string): void {
-  if (!isBackendTaskId(taskId)) return;
+  if (!taskId) return;
   void tasksApi.update(taskId, { status }).catch(() => undefined);
 }
 
 export function syncDeleteTask(taskId: string): void {
-  if (!isBackendTaskId(taskId)) return;
+  if (!taskId) return;
   void tasksApi.remove(taskId).catch(() => undefined);
 }
 

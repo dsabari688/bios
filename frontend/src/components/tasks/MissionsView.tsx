@@ -116,13 +116,15 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
     }
   };
 
+  const normalizeDate = (d: string | undefined | null) => (d ? (d.includes("T") ? d.split("T")[0] : d) : "");
+
   // Tab counts
   const counts: Record<FilterTab, number> = {
     all: localTasks.length,
-    today: localTasks.filter((t) => t.date === todayStr).length,
-    date: localTasks.filter((t) => t.date === selectedDate).length,
-    upcoming: localTasks.filter((t) => t.date > todayStr).length,
-    past: localTasks.filter((t) => t.date < todayStr).length,
+    today: localTasks.filter((t) => normalizeDate(t.date) === todayStr).length,
+    date: localTasks.filter((t) => normalizeDate(t.date) === selectedDate).length,
+    upcoming: localTasks.filter((t) => normalizeDate(t.date) > todayStr).length,
+    past: localTasks.filter((t) => normalizeDate(t.date) < todayStr).length,
     pending: localTasks.filter((t) => t.status === "pending").length,
     completed: localTasks.filter((t) => t.status === "completed").length,
     rescheduled: localTasks.filter((t) => (t.rescheduledCount || 0) > 0).length,
@@ -134,10 +136,11 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
     const titleMatch = t.title.toLowerCase().includes(searchTerm.toLowerCase());
     if (!titleMatch) return false;
 
-    if (activeTab === "today") return t.date === todayStr;
-    if (activeTab === "date") return t.date === selectedDate;
-    if (activeTab === "upcoming") return t.date > todayStr;
-    if (activeTab === "past") return t.date < todayStr;
+    const taskDate = normalizeDate(t.date);
+    if (activeTab === "today") return taskDate === todayStr;
+    if (activeTab === "date") return taskDate === selectedDate;
+    if (activeTab === "upcoming") return taskDate > todayStr;
+    if (activeTab === "past") return taskDate < todayStr;
     if (activeTab === "pending") return t.status === "pending";
     if (activeTab === "completed") return t.status === "completed";
     if (activeTab === "rescheduled") return (t.rescheduledCount || 0) > 0;
@@ -148,27 +151,32 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
 
   // Sort and group tasks by Date
   const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
-    const dateCompare = a.date.localeCompare(b.date);
+    const aDate = String(a?.date || "");
+    const bDate = String(b?.date || "");
+    const dateCompare = aDate.localeCompare(bDate);
     if (dateCompare !== 0) return dateCompare;
     
-    const aIsCritical = a.category === "urgent-important";
-    const bIsCritical = b.category === "urgent-important";
+    const aIsCritical = a?.category === "urgent-important" || a?.category === "important-urgent";
+    const bIsCritical = b?.category === "urgent-important" || b?.category === "important-urgent";
     if (aIsCritical !== bIsCritical) {
       return aIsCritical ? -1 : 1;
     }
     
-    return a.time.localeCompare(b.time);
+    const aTime = String(a?.time || "09:00");
+    const bTime = String(b?.time || "09:00");
+    return aTime.localeCompare(bTime);
   });
 
   const groupedTasks: Record<string, Task[]> = {};
   sortedFilteredTasks.forEach((task) => {
-    if (!groupedTasks[task.date]) {
-      groupedTasks[task.date] = [];
+    const taskDateKey = String(task?.date || "");
+    if (!groupedTasks[taskDateKey]) {
+      groupedTasks[taskDateKey] = [];
     }
-    groupedTasks[task.date].push(task);
+    groupedTasks[taskDateKey].push(task);
   });
 
-  const sortedDates = Object.keys(groupedTasks).sort((a, b) => a.localeCompare(b));
+  const sortedDates = Object.keys(groupedTasks).sort((a, b) => String(a || "").localeCompare(String(b || "")));
 
   const toggleRescheduleForm = (taskId: string, defaultDate: string) => {
     setShowRescheduleFormMap((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
@@ -188,9 +196,9 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
   // FULL HELPER FUNCTION WITH ALL BUTTONS
   const renderTaskCard = (task: Task, isMission: boolean) => {
     const isCompleted = task.status === "completed";
-    const isCritical = task.category === "urgent-important";
+    const isCritical = task.category === "urgent-important" || task.category === "important-urgent";
     const isImportant = task.category === "important-not-urgent";
-    const isUrgentMinor = task.category === "urgent-not-important";
+    const isUrgentMinor = task.category === "urgent-not-important" || task.category === "not-important-urgent";
 
     let priorityLabel = "Low";
     let priorityBadgeColor = "bg-emerald-50 text-emerald-700 border-emerald-150";

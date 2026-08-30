@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Moon, CheckCircle2, Clock } from "lucide-react";
 import { formatTo12Hour } from "../../lib/timeUtils";
+import { getApiBaseUrl } from "../../api/client";
 
 interface SleepTrackerProps {
   token: string | null;
@@ -24,12 +25,9 @@ export const SleepTracker: React.FC<SleepTrackerProps> = ({ token, onNudgeTrigge
   const todayStr = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    fetch("/api/sleep/today", {
-      headers: { "Authorization": `Bearer ${token}` }
+    const baseUrl = getApiBaseUrl();
+    fetch(`${baseUrl}/sleep/today`, {
+      headers: { ...(token ? { "Authorization": `Bearer ${token}` } : {}) }
     })
       .then(res => {
         if (res.ok) return res.json();
@@ -50,24 +48,25 @@ export const SleepTracker: React.FC<SleepTrackerProps> = ({ token, onNudgeTrigge
   }, [token, saved]);
 
   const computeDuration = (sleep: string, wake: string) => {
-    if (!sleep || !wake) return 0;
+    if (!sleep || !wake || typeof sleep !== "string" || typeof wake !== "string" || !sleep.includes(":") || !wake.includes(":")) return 0;
     const [sH, sM] = sleep.split(":").map(Number);
     const [wH, wM] = wake.split(":").map(Number);
+    if (isNaN(sH) || isNaN(sM) || isNaN(wH) || isNaN(wM)) return 0;
     let diff = (wH * 60 + wM) - (sH * 60 + sM);
     if (diff < 0) diff += 24 * 60; // Handles crossing midnight
     return Math.round((diff / 60) * 10) / 10;
   };
 
   const handleSave = async () => {
-    if (!token) return;
     const duration = computeDuration(sleepTime, wakeTime);
 
     try {
-      const res = await fetch("/api/sleep", {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/sleep`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           sleepTime,

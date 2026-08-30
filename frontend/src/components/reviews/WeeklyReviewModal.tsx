@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Sparkles, TrendingUp, CheckCircle, RefreshCw, AlertCircle, ShieldAlert, Award, IndianRupee } from "lucide-react";
+import { getApiBaseUrl } from "../../api/client";
 
 interface WeeklyReviewData {
   tasksCompleted: number;
@@ -28,10 +29,11 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isOpen || !token) return;
+    if (!isOpen) return;
     setLoading(true);
-    fetch("/api/analytics/weekly-review", {
-      headers: { "Authorization": `Bearer ${token}` }
+    const baseUrl = getApiBaseUrl();
+    fetch(`${baseUrl}/analytics/weekly-review`, {
+      headers: { ...(token ? { "Authorization": `Bearer ${token}` } : {}) }
     })
       .then(res => res.json())
       .then(payload => {

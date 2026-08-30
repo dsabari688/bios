@@ -128,11 +128,6 @@ export class DuplicateHabitError extends Error {
 export const habitService = {
   async createHabit(input: CreateHabitInput) {
     const trimmedName = input.name.trim();
-    const existing = await habitRepository.findByName(trimmedName);
-
-    if (existing) {
-      throw new DuplicateHabitError(existing.name);
-    }
 
     return habitRepository.create({
       ...input,
@@ -376,12 +371,6 @@ export const habitService = {
   },
 
   async deleteHabit(id: string) {
-    const habit = await habitRepository.findById(id);
-
-    if (!habit) {
-      throw new Error("Habit not found");
-    }
-
     await habitRepository.delete(id);
 
     return {

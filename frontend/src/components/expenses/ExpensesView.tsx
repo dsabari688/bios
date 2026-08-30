@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Plus, Wallet, FileText, Upload, Sparkles, Check, CheckCircle2, ChevronRight, Calendar, Edit2, AlertTriangle, MessageSquare } from "lucide-react";
 import { Expense, CategoryBudget } from "../../types";
+import { getApiBaseUrl } from "../../api/client";
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -52,8 +53,11 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   
   const getCategorySpend = (cat: string) => {
     return expenses
-      .filter((e) => e.category === cat && e.date.substring(0, 7) === currentMonthStr)
-      .reduce((sum, e) => sum + e.amount, 0);
+      .filter((e) => {
+        const d = e.date || (e as any).transactionDate || "";
+        return e.category === cat && d.substring(0, 7) === currentMonthStr;
+      })
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
   };
 
   const getCategoryBudgetLimit = (cat: string) => {
@@ -72,7 +76,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     formData.append("receipt", file);
 
     try {
-      const res = await fetch("/api/expenses/scan-receipt", {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/expenses/scan-receipt`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -136,13 +141,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   // Group expenses by Month for display
   const groupedExpenses: Record<string, Expense[]> = {};
   expenses.forEach((e) => {
-    const month = e.date.substring(0, 7); // YYYY-MM
+    const d = e.date || (e as any).transactionDate || new Date().toISOString();
+    const month = d.substring(0, 7); // YYYY-MM
     if (!groupedExpenses[month]) groupedExpenses[month] = [];
     groupedExpenses[month].push(e);
   });
 
   // Sort months descending
-  const sortedMonths = Object.keys(groupedExpenses).sort((a, b) => b.localeCompare(a));
+  const sortedMonths = Object.keys(groupedExpenses).sort((a, b) => String(b || "").localeCompare(String(a || "")));
 
   return (
     <div className="space-y-6 pb-24">
@@ -283,7 +289,11 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 const dateObj = new Date(parseInt(y), parseInt(m) - 1, 1);
                 const monthTitle = dateObj.toLocaleString("default", { month: "long", year: "numeric" });
                 
-                const monthExpenses = groupedExpenses[month].sort((a,b)=>b.date.localeCompare(a.date));
+                const monthExpenses = groupedExpenses[month].sort((a, b) => {
+                  const aDate = String(a?.date || (a as any)?.transactionDate || "");
+                  const bDate = String(b?.date || (b as any)?.transactionDate || "");
+                  return bDate.localeCompare(aDate);
+                });
 
                 return (
                   <div key={month} className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">

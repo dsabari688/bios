@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Task, TaskPriority } from "../../types";
 import { formatTo12Hour, getLocalDateString } from "../../lib/timeUtils";
 import { useStore } from "../../store/useStore";
+import { taskCategoryToFront } from "../../api/tasks.api";
 
 const CloseIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
@@ -56,7 +57,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, i
   useEffect(() => {
     if (initialTask) {
       setTitle(initialTask.title);
-      setCategory(initialTask.category === "urgent-not-important" ? "important-not-urgent" : initialTask.category);
+      setCategory(taskCategoryToFront(initialTask.category));
       setDate(initialTask.date);
       setTime(initialTask.time);
       setEndTime(initialTask.endTime || "");

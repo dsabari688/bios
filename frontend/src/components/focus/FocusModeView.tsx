@@ -2,19 +2,13 @@ import React, { useState, useEffect, useRef } from "react";
 import FocusScoreCard from "../dashboard/FocusScoreCard";
 import { Play, Pause, RotateCcw, CheckCircle2, ShieldCheck, Flame, Bell, VolumeX, Volume2 } from "lucide-react";
 import { useStore } from "../../store/useStore";
-
-interface FocusModeViewProps {
-  defaultTaskTitle?: string;
-  token?: string | null;
-}
+import { getApiBaseUrl } from "../../api/client";
 
 export type TimerState = "idle" | "running" | "paused" | "completed";
 
-export const FocusModeView: React.FC<FocusModeViewProps> = ({
-  defaultTaskTitle = "Refactor Application State Metrics & DB Handlers",
-  token
-}) => {
-  const { logFocusSession } = useStore();
+export const FocusModeView: React.FC = () => {
+  const { osData, logFocusSession, showToast } = useStore();
+  const [selectedTask, setSelectedTask] = useState<string>("general");
   const [selectedDuration, setSelectedDuration] = useState<number>(25); // minutes
   const [timeRemaining, setTimeRemaining] = useState<number>(25 * 60); // seconds
   const [timerState, setTimerState] = useState<TimerState>("idle");
@@ -27,7 +21,8 @@ export const FocusModeView: React.FC<FocusModeViewProps> = ({
 
   // Fetch initial focus metrics from backend on mount
   useEffect(() => {
-    fetch("/api/piggy/dashboard")
+    const baseUrl = getApiBaseUrl();
+    fetch(`${baseUrl}/piggy/dashboard`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.summary) {

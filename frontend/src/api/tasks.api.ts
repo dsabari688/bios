@@ -10,9 +10,12 @@ const CATEGORY_FRONT_TO_BACK: Record<TaskPriority, string> = {
 
 const CATEGORY_BACK_TO_FRONT: Record<string, TaskPriority> = {
   "important-urgent": "urgent-important",
+  "urgent-important": "urgent-important",
   "important-not-urgent": "important-not-urgent",
   "not-important-urgent": "urgent-not-important",
+  "urgent-not-important": "urgent-not-important",
   "not-important-not-urgent": "not-urgent-not-important",
+  "not-urgent-not-important": "not-urgent-not-important",
 };
 
 export interface BackendTaskRow {

@@ -7,6 +7,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import { useStore } from "../../store/useStore";
 import { formatTimestamp12Hour } from "../../lib/timeUtils";
+import { getApiBaseUrl } from "../../api/client";
 
 interface AIDashboardViewProps {
   token: string | null;
@@ -34,22 +35,22 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
   };
 
   const fetchAllData = async () => {
-    if (!token) return;
     try {
       setLoading(true);
+      const baseUrl = getApiBaseUrl();
       
       // Fetch Dashboard
-      const dashRes = await fetch("/api/piggy/dashboard", { headers });
+      const dashRes = await fetch(`${baseUrl}/piggy/dashboard`, { headers });
       const dash = await dashRes.json();
       if (dash.success) setDashboardData(dash);
 
       // Fetch Coaching
-      const coachRes = await fetch("/api/piggy/coaching", { headers });
+      const coachRes = await fetch(`${baseUrl}/piggy/coaching`, { headers });
       const coach = await coachRes.json();
       if (coach.success) setCoachingData(coach);
 
       // Fetch Reflections
-      const refRes = await fetch("/api/piggy/reflections", { headers });
+      const refRes = await fetch(`${baseUrl}/piggy/reflections`, { headers });
       const refs = await refRes.json();
       if (refs.success) setReflections(refs.reflections);
 
@@ -65,10 +66,11 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
   }, [token]);
 
   const handleGenerateReflection = async () => {
-    if (!token || generatingReflection) return;
+    if (generatingReflection) return;
     try {
       setGeneratingReflection(true);
-      const res = await fetch("/api/piggy/reflection/generate", {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/piggy/reflection/generate`, {
         method: "POST",
         headers: buildJsonHeaders()
       });
@@ -94,6 +96,12 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
 
   const { cockpit = {}, habitsData = [], correlations = [], achievements = [] } = dashboardData || {};
   const { weeklyCoach = {}, monthlyTrends = [] } = coachingData || {};
+
+  const healthScore = typeof cockpit?.healthScore === "number" ? cockpit.healthScore : 0;
+  const consistencyVal = typeof cockpit?.consistency === "number" ? cockpit.consistency : 0;
+  const momentumVal = typeof cockpit?.momentum === "number" ? cockpit.momentum : 0;
+  const goalProgressVal = typeof cockpit?.goalProgress === "number" ? cockpit.goalProgress : 0;
+  const burnoutRiskVal = typeof cockpit?.burnoutRisk === "number" ? cockpit.burnoutRisk : 0;
 
   return (
     <div className="space-y-6">
@@ -145,12 +153,12 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                   <circle cx="56" cy="56" r="48" className="stroke-slate-800 fill-none" strokeWidth="6" />
                   <circle cx="56" cy="56" r="48" className="stroke-amber-500 fill-none" strokeWidth="6" 
                     strokeDasharray={2 * Math.PI * 48}
-                    strokeDashoffset={2 * Math.PI * 48 * (1 - (cockpit.healthScore || 0) / 100)}
+                    strokeDashoffset={2 * Math.PI * 48 * (1 - healthScore / 100)}
                     strokeLinecap="round"
                   />
                 </svg>
                 <div className="text-center">
-                  <span className="font-display font-black text-3xl text-white glow-text-amber">{cockpit.healthScore || 0}</span>
+                  <span className="font-display font-black text-3xl text-white glow-text-amber">{healthScore}</span>
                   <span className="text-[8px] font-mono font-bold text-amber-500 block uppercase mt-0.5">OPTIMAL</span>
                 </div>
               </div>
@@ -159,9 +167,9 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
 
             {/* General metrics widgets */}
             {[
-              { label: "Consistency Rate", value: `${cockpit.consistency}%`, sub: "Habits & Tasks logs", color: "text-emerald-400" },
-              { label: "Habit Momentum", value: `${cockpit.momentum}%`, sub: "Trending pace", color: "text-amber-400" },
-              { label: "Goal Progress", value: `${cockpit.goalProgress}%`, sub: "Strategic milestone rate", color: "text-indigo-400" },
+              { label: "Consistency Rate", value: `${consistencyVal}%`, sub: "Habits & Tasks logs", color: "text-emerald-400" },
+              { label: "Habit Momentum", value: `${momentumVal}%`, sub: "Trending pace", color: "text-amber-400" },
+              { label: "Goal Progress", value: `${goalProgressVal}%`, sub: "Strategic milestone rate", color: "text-indigo-400" },
             ].map((m, idx) => (
               <div key={idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
                 <span className="text-[9px] font-mono font-bold uppercase text-slate-400 tracking-widest">{m.label}</span>
@@ -184,14 +192,14 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                   <circle cx="56" cy="56" r="48" className="stroke-slate-800 fill-none" strokeWidth="6" />
                   <circle cx="56" cy="56" r="48" className="stroke-rose-500 fill-none" strokeWidth="6" 
                     strokeDasharray={2 * Math.PI * 48}
-                    strokeDashoffset={2 * Math.PI * 48 * (1 - (cockpit.burnoutRisk || 0) / 100)}
+                    strokeDashoffset={2 * Math.PI * 48 * (1 - burnoutRiskVal / 100)}
                     strokeLinecap="round"
                   />
                 </svg>
                 <div className="text-center">
-                  <span className="font-display font-black text-3xl text-rose-500">{cockpit.burnoutRisk || 0}%</span>
+                  <span className="font-display font-black text-3xl text-rose-500">{burnoutRiskVal}%</span>
                   <span className="text-[8px] font-mono font-bold text-rose-500 block uppercase mt-0.5">
-                    {cockpit.burnoutRisk > 40 ? "ATTENTION" : "STABLE"}
+                    {burnoutRiskVal > 40 ? "ATTENTION" : "STABLE"}
                   </span>
                 </div>
               </div>
