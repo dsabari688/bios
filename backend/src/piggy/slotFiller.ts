@@ -1,19 +1,6 @@
-/**
- * slotFiller.ts
- *
- * Robust multi-turn slot-filling for Piggy actions.
- * Features:
- * - Speech-to-text typo normalization ("10 pam" -> "10 pm", "tosay" -> "today")
- * - Multi-slot extraction (extracts date AND time from a single reply like "today 10 pm")
- * - Cancellation handling ("cancel", "never mind")
- * - Mid-flow corrections ("actually 8 PM")
- * - Explicit field clearing ("remove description")
- * - Bare-hour confirmation ("7" -> "7 PM?")
- * - Intent interruption detection (user switches topic during slot-fill)
- */
-
 import type { SlotSpec, PendingAction } from "./conversationState.js";
-import { parseNormalizedDate, parseNormalizedTime, resolveDateAndTime } from "./dateNormalizer.js";
+import { parseNormalizedDate, parseNormalizedTime, resolveDateAndTime, formatLocalDate } from "./dateNormalizer.js";
+import { listPiggyTools } from "./toolExecutor.js";
 
 // ─── Typo & Speech-to-Text Normalizer ──────────────────────────────────────
 
@@ -46,7 +33,34 @@ export function parseDate(raw: string): string | null {
   return res.valid ? (res.date ?? null) : null;
 }
 
-// ─── Slot Definitions ──────────────────────────────────────────────────────
+// ─── Default / Unsure Detection ────────────────────────────────────────────
+
+export function isDefaultOrUnsureResponse(message: string): boolean {
+  const lower = message.toLowerCase().trim();
+  if (!lower) return false;
+
+  if (/^\s*(make\s+)?default\s*$/i.test(lower)) return true;
+  if (/\b(make default|use default|set default|default value|standard)\b/i.test(lower)) return true;
+  if (/\b(you decide|u decide|neeyeh choose|neeye choose|choose for me|you pick|u pick|neeye|neeyeh)\b/i.test(lower)) return true;
+  if (/\b(whatever|doesn't matter|doesnt matter|don't matter|dont matter|no matter)\b/i.test(lower)) return true;
+  if (/\b(therla|onnum illa|onum illa|idk|don't know|dont know|no idea|up to you|anything|any|not sure|skip|no preference|whichever)\b/i.test(lower)) return true;
+
+  return false;
+}
+
+export function getDefaultValueForSlot(tool: string, slotKey: string): string | null {
+  const tools = listPiggyTools();
+  const def = tools.find((t) => t.name === tool);
+  const schemaDefault = def?.inputSchema?.properties?.[slotKey]?.default;
+  if (typeof schemaDefault === "string") return schemaDefault;
+
+  if (slotKey === "date") return formatLocalDate(new Date());
+  if (slotKey === "category") return "important-not-urgent";
+  if (slotKey === "title") return "New Task";
+  return null;
+}
+
+// ─── Slot Definitions & Dynamic Schema Filter ─────────────────────────────
 
 type SlotDef = Omit<SlotSpec, "transform"> & {
   transform?: (raw: string, args: Record<string, string>) => string | null;
@@ -73,6 +87,16 @@ export const SLOT_DEFINITIONS: Record<string, SlotDef[]> = {
   piggy_task_create: TASK_SLOTS,
 };
 
+export function getRequiredSlotDefs(tool: string): SlotDef[] {
+  const allSlotDefs = SLOT_DEFINITIONS[tool] ?? [];
+  const tools = listPiggyTools();
+  const def = tools.find((t) => t.name === tool);
+  const requiredFields = def?.inputSchema?.required ?? [];
+
+  if (requiredFields.length === 0) return [];
+  return allSlotDefs.filter((slot) => requiredFields.includes(slot.key));
+}
+
 // ─── Slot-Filler Types ─────────────────────────────────────────────────────
 
 export interface SlotResult {
@@ -97,15 +121,12 @@ export function startSlotFilling(
   tool: string,
   prefilledArgs: Record<string, string> = {},
 ): SlotFillerResult {
-  const slotDefs = SLOT_DEFINITIONS[tool];
-  if (!slotDefs) {
-    return { ready: true, args: prefilledArgs };
-  }
-
+  const slotDefs = getRequiredSlotDefs(tool);
   const collectedArgs: Record<string, string> = { ...prefilledArgs };
 
   // Apply transforms to prefilled values
-  for (const slot of slotDefs) {
+  const allPossibleSlots = SLOT_DEFINITIONS[tool] ?? [];
+  for (const slot of allPossibleSlots) {
     if (collectedArgs[slot.key] !== undefined && slot.transform) {
       const transformed = slot.transform(collectedArgs[slot.key], collectedArgs);
       if (transformed !== null) {
@@ -116,7 +137,7 @@ export function startSlotFilling(
     }
   }
 
-  // Resolve past time rollover if date & time present
+  // Resolve date and time if date & time present
   if (collectedArgs.date && collectedArgs.time) {
     const resolved = resolveDateAndTime(collectedArgs.date, collectedArgs.time);
     if (resolved.valid && resolved.date) {
@@ -132,11 +153,13 @@ export function startSlotFilling(
   }
 
   const nextSlot = remainingSlots[0];
+  const slotRetryCounts: Record<string, number> = { [nextSlot.key]: 1 };
   const pendingAction: PendingAction = {
     tool,
     collectedArgs,
     remainingSlots: remainingSlots as SlotSpec[],
     lastQuestion: nextSlot.question,
+    slotRetryCounts,
     updatedAt: Date.now(),
   };
 
@@ -165,9 +188,10 @@ export function continueSlotFilling(
     };
   }
 
-  // 2. Check Intent Interruption: User completely changed topic or issued a new command (e.g. "hi", "create a task...", "my friend said...")
+  // 2. Check Intent Interruption: User completely changed topic or issued a new command
   const isInterruption = /^(hi|hello|hey|yo|sup|create|add|make|schedule|set up|delete|remove|clear|complete|finish|what|how|who|why|recommend|sing|tell me|motivate|my friend)\b/i.test(lower) &&
-    !/^(today|tomorrow|tonight|this evening|this morning|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i.test(lower);
+    !/^(today|tomorrow|tonight|this evening|this morning|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i.test(lower) &&
+    !isDefaultOrUnsureResponse(userMessage);
 
   if (isInterruption) {
     return {
@@ -217,19 +241,47 @@ export function continueSlotFilling(
     }
   }
 
-  // 5. Multi-slot Extraction: Extract ALL possible slots from the user's message
+  // 5. Multi-slot Extraction & Default Handling
   const collected = { ...pending.collectedArgs };
+  const retryCounts: Record<string, number> = { ...(pending.slotRetryCounts ?? {}) };
+  const currentSlot = pending.remainingSlots[0];
+  const isDefaultUserResponse = isDefaultOrUnsureResponse(userMessage);
 
-  // Try extracting date
+  if (currentSlot) {
+    const slotKey = currentSlot.key;
+    const currentAttemptCount = retryCounts[slotKey] ?? 1;
+
+    // Check if user requested default OR if this is attempt 2 without a usable answer
+    if (isDefaultUserResponse || currentAttemptCount >= 1) {
+      const extractedDate = parseDate(normalized);
+      const extractedTime = parseTime(normalized);
+
+      let extractedValue: string | null = null;
+      if (slotKey === "date" && extractedDate) extractedValue = extractedDate;
+      else if (slotKey === "time" && extractedTime) extractedValue = extractedTime;
+      else if (slotKey === "title" && !isDefaultUserResponse && rawMsg.length >= 2) extractedValue = rawMsg;
+
+      if (extractedValue) {
+        collected[slotKey] = extractedValue;
+      } else {
+        // Auto-apply default value
+        const defaultValue = getDefaultValueForSlot(pending.tool, slotKey);
+        if (defaultValue !== null) {
+          collected[slotKey] = defaultValue;
+        }
+        console.log(`[PIGGY][SLOT] Default value applied for slot ${slotKey}: ${defaultValue ?? "(none)"}`);
+      }
+    }
+  }
+
+  // Try extracting any additional slots present in text
   const extractedDate = parseDate(normalized);
   if (extractedDate) {
     collected.date = extractedDate;
   }
 
-  // Try extracting time
   const extractedTime = parseTime(normalized);
   if (extractedTime) {
-    // Check if user provided a bare hour (like "7" or "10") without am/pm
     const bareHourMatch = /^(\d{1,2})$/.exec(normalized.trim());
     if (bareHourMatch && !/am|pm|morning|afternoon|evening|night/i.test(normalized)) {
       const h = parseInt(bareHourMatch[1], 10);
@@ -237,7 +289,7 @@ export function continueSlotFilling(
         const pmTime = h === 12 ? "12:00" : `${String(h + 12).padStart(2, "0")}:00`;
         collected.time = pmTime;
 
-        const slotDefs = SLOT_DEFINITIONS[pending.tool] ?? TASK_SLOTS;
+        const slotDefs = getRequiredSlotDefs(pending.tool);
         const remaining = slotDefs.filter((s) => !collected[s.key]);
         const confirmQuestion = `${h} PM?`;
         const updated: PendingAction = {
@@ -246,6 +298,7 @@ export function continueSlotFilling(
           remainingSlots: remaining as SlotSpec[],
           lastQuestion: confirmQuestion,
           awaitingConfirmation: true,
+          slotRetryCounts: retryCounts,
           updatedAt: Date.now(),
         };
         return { ready: false, question: confirmQuestion, updatedAction: updated };
@@ -254,12 +307,11 @@ export function continueSlotFilling(
     collected.time = extractedTime;
   }
 
-  // If title was missing and the user reply is not just a date/time keyword, use it as title!
-  if (!collected.title) {
+  // If title was missing and user reply is not a date/time keyword or default expression, use it as title!
+  if (!collected.title && !isDefaultUserResponse) {
     if (!extractedDate && !extractedTime) {
       collected.title = rawMsg;
     } else {
-      // User said "Study Java tomorrow at 7 PM" during slot filling -> extract title
       const titleCleaned = rawMsg
         .replace(/\b(today|tomorrow|tonight|next \w+|on \w+|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|at \d{1,2})\b/gi, "")
         .trim();
@@ -278,8 +330,8 @@ export function continueSlotFilling(
     }
   }
 
-  // 6. Recalculate missing slots
-  const slotDefs = SLOT_DEFINITIONS[pending.tool] ?? TASK_SLOTS;
+  // 6. Recalculate missing required slots
+  const slotDefs = getRequiredSlotDefs(pending.tool);
   const remainingSlots = slotDefs.filter((s) => !collected[s.key]);
 
   if (remainingSlots.length === 0) {
@@ -287,12 +339,15 @@ export function continueSlotFilling(
   }
 
   const nextSlot = remainingSlots[0];
+  retryCounts[nextSlot.key] = (retryCounts[nextSlot.key] ?? 0) + 1;
+
   const updatedAction: PendingAction = {
     tool: pending.tool,
     collectedArgs: collected,
     remainingSlots: remainingSlots as SlotSpec[],
     lastQuestion: nextSlot.question,
     awaitingConfirmation: false,
+    slotRetryCounts: retryCounts,
     updatedAt: Date.now(),
   };
 
@@ -318,8 +373,8 @@ function formatDateHuman(dateStr: string): string {
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
 
-  const todayStr = today.toISOString().slice(0, 10);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  const todayStr = formatLocalDate(today);
+  const tomorrowStr = formatLocalDate(tomorrow);
 
   if (dateStr === todayStr) return "today";
   if (dateStr === tomorrowStr) return "tomorrow";

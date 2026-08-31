@@ -8,7 +8,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 
 import { useStore } from "../store/useStore";
-import { Task, Habit, Goal } from "../types";
+import { Task, Habit, Goal, safeLogs } from "../types";
 
 // Modals and sidebars
 import { TaskModal } from "../components/tasks/TaskModal";
@@ -110,6 +110,7 @@ export default function App() {
   const handleSaveProfile = async (profile: any) => {
     if (!osData) return;
     await saveProfile({
+      avatar: profile.avatar || osData.profile.avatar,
       name: profile.name,
       email: profile.email,
       budgetLimit: osData.profile.budgetLimit || 1000,
@@ -262,7 +263,7 @@ export default function App() {
     if (!osData) return 0;
     const todayStrForScore = new Date().toISOString().split("T")[0];
     const taskScore = osData.tasks.length ? (osData.tasks.filter(t => t.status === "completed").length / osData.tasks.length) * 60 : 0;
-    const habitScore = osData.habits.length ? (osData.habits.filter(h => h.logs.includes(todayStrForScore)).length / osData.habits.length) * 40 : 0;
+    const habitScore = osData.habits.length ? (osData.habits.filter(h => safeLogs(h?.logs).includes(todayStrForScore)).length / osData.habits.length) * 40 : 0;
     return Math.round(taskScore + habitScore);
   }, [osData]);
 
@@ -991,7 +992,7 @@ export default function App() {
           onClose={() => setIsDailyReviewOpen(false)}
           tasksCompleted={osData.tasks.filter(t => t.status === "completed").length}
           totalTasks={osData.tasks.length}
-          habitsCompleted={osData.habits.filter(h => h.logs.includes(new Date().toISOString().split("T")[0])).length}
+          habitsCompleted={osData.habits.filter(h => safeLogs(h?.logs).includes(new Date().toISOString().split("T")[0])).length}
           totalHabits={osData.habits.length}
           activeStreak={osData.habits.length > 0 ? Math.max(...osData.habits.map(h => h.streak), 0) : 0}
           productivityScore={realProductivityScore}

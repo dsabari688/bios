@@ -1,13 +1,31 @@
 import { apiRequest } from "./client";
 import type { Habit } from "../types";
 
+function normalizeHabit(h: any): Habit {
+  let logs: string[] = [];
+  if (Array.isArray(h?.logs)) {
+    logs = h.logs;
+  } else if (typeof h?.logs === "string") {
+    try {
+      const parsed = JSON.parse(h.logs);
+      if (Array.isArray(parsed)) logs = parsed;
+    } catch {}
+  }
+  return {
+    ...h,
+    logs,
+  };
+}
+
 export const habitsApi = {
   async getAll(): Promise<Habit[]> {
-    return apiRequest<Habit[]>("/habits");
+    const raw = await apiRequest<Habit[]>("/habits");
+    return Array.isArray(raw) ? raw.map(normalizeHabit) : [];
   },
 
   async getById(id: string): Promise<Habit> {
-    return apiRequest<Habit>(`/habits/${id}`);
+    const raw = await apiRequest<Habit>(`/habits/${id}`);
+    return normalizeHabit(raw);
   },
 
   async create(

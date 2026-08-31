@@ -5,6 +5,8 @@ const router = Router();
 
 router.get("/", notificationController.getAll);
 
+router.post("/", notificationController.create);
+
 router.patch("/:id/read", notificationController.markRead);
 
 export default router;

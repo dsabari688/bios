@@ -1,4 +1,5 @@
 import { runHabitReminderCheck } from "./habitReminderJob.js";
+import { runTaskReminderCheck } from "./taskReminderJob.js";
 
 const TICK_INTERVAL_MS = 60_000;
 
@@ -7,6 +8,7 @@ let schedulerTimer: NodeJS.Timeout | null = null;
 async function tick() {
   try {
     await runHabitReminderCheck(new Date());
+    await runTaskReminderCheck(new Date());
   } catch (error) {
     console.error("[scheduler] tick failed:", error);
   }

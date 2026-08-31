@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from "react";
-import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle, Server, Wifi } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle, Server, Wifi, Camera } from "lucide-react";
 import { useStore } from "../../store/useStore";
 import { getApiBaseUrl, setCustomServerUrl } from "../../api/client";
 import { connectionMonitor } from "../../sync/connectionMonitor";
 
 interface SettingsViewProps {
   initialProfile: {
+    avatar?: string;
     name: string;
     email: string;
     aiPersonality: string;
@@ -17,6 +18,7 @@ interface SettingsViewProps {
     activationWord?: string;
   };
   onSaveProfile: (profile: { 
+    avatar?: string;
     name: string; 
     email: string; 
     aiPersonality: 'Calm' | 'Energetic' | 'Cynical' | 'Logical';
@@ -121,11 +123,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
   
   // Local state form fields
+  const [avatar, setAvatar] = useState(initialProfile.avatar || "");
   const [name, setName] = useState(initialProfile.name);
   const [email, setEmail] = useState(initialProfile.email);
   const [personality, setPersonality] = useState(initialProfile.aiPersonality);
   const [activationWord, setActivationWord] = useState(initialProfile.activationWord || "piggy");
   const [serverIpUrl, setServerIpUrl] = useState(() => (typeof window !== "undefined" && window.localStorage ? localStorage.getItem("bios_server_url") || "" : ""));
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Image size must be less than 5MB.", "error");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target?.result as string;
+      if (base64Data) {
+        setAvatar(base64Data);
+        showToast("Profile photo loaded! Click 'Commit Specifications' below to save.", "success");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleSaveServerIpUrl = () => {
     setCustomServerUrl(serverIpUrl);
@@ -220,6 +244,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveProfile({
+      avatar,
       name,
       email,
       aiPersonality: personality as 'Calm' | 'Energetic' | 'Cynical' | 'Logical',
@@ -308,18 +333,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <p className="text-xs text-slate-400 mt-0.5">Edit core parameters linked to your client node.</p>
             </div>
 
-            {/* Simulated Avatar Preview */}
+            {/* Profile Photo File Upload */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoUpload}
+            />
+
             <div className="flex items-center gap-4 py-2">
               <img
-                src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120"
-                alt="Alex Mercer"
-                className="w-16 h-16 rounded-full border-2 border-amber-500 object-cover"
+                src={avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120"}
+                alt={name || "Profile Photo"}
+                className="w-16 h-16 rounded-full border-2 border-amber-500 object-cover shadow-sm"
               />
               <button 
                 type="button" 
-                className="text-xs font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                onClick={() => showToast("Simulated: Local file system camera capture triggered.", "info")}
+                className="text-xs font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3.5 py-2 rounded-xl transition-all hover:shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5"
+                onClick={() => fileInputRef.current?.click()}
               >
+                <Camera className="w-3.5 h-3.5" />
                 Deploy Profile Photo
               </button>
             </div>

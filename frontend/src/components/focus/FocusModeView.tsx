@@ -156,6 +156,10 @@ export const FocusModeView: React.FC = () => {
   const progressRatio = totalSeconds > 0 ? timeRemaining / totalSeconds : 1;
   const strokeDashoffset = 2 * Math.PI * 90 * (1 - progressRatio);
 
+  // Task title resolution
+  const activeTaskObj = osData.tasks.find((t) => t.id === selectedTask);
+  const activeTaskTitle = activeTaskObj ? activeTaskObj.title : "Deep Work Focus Session";
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-8 max-w-2xl mx-auto flex flex-col items-center justify-between text-center min-h-[580px] relative overflow-hidden">
       
@@ -166,7 +170,7 @@ export const FocusModeView: React.FC = () => {
       <div className="space-y-1 z-10">
         <span className="font-mono text-[9px] font-bold text-amber-500 uppercase tracking-widest block">Core active target</span>
         <h3 className="font-display font-extrabold text-lg text-slate-800 max-w-md mx-auto leading-snug">
-          {defaultTaskTitle}
+          {activeTaskTitle}
         </h3>
       </div>
 

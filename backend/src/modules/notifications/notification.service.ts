@@ -22,4 +22,13 @@ export const notificationService = {
 
     return notification;
   },
+
+  async createNotification(input: { type?: string; title: string; message: string; dedupeKey?: string }) {
+    return notificationRepository.create({
+      type: input.type || "system",
+      title: input.title,
+      message: input.message,
+      dedupeKey: input.dedupeKey,
+    });
+  },
 };

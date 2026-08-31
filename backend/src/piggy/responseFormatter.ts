@@ -33,10 +33,15 @@ export function sanitizeUserResponse(text: string): string {
     cleaned = cleaned.replace(pattern, "");
   }
 
-  // Strip UUIDs, [id=...], and (ID: ...)
+  // Strip UUIDs, [id=...], (ID: ...), and raw ID references
   cleaned = cleaned.replace(UUID_REGEX, "");
   cleaned = cleaned.replace(ID_BRACKET_REGEX, "");
   cleaned = cleaned.replace(ID_PAREN_REGEX, "");
+  cleaned = cleaned.replace(/\bwhich task id\b/gi, "Which task");
+  cleaned = cleaned.replace(/\btask id\b/gi, "task");
+  cleaned = cleaned.replace(/\bhabit id\b/gi, "habit");
+  cleaned = cleaned.replace(/\bgoal id\b/gi, "goal");
+  cleaned = cleaned.replace(/\bexpense id\b/gi, "expense");
 
   // Clean up formatting glitches left by removals
   cleaned = cleaned

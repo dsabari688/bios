@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useStore } from "../../store/useStore";
 import { getLocalDateString } from "../../lib/timeUtils";
+import { safeLogs } from "../../types";
 import { motion, AnimatePresence } from "motion/react";
 
 export const DiaryView: React.FC = () => {
@@ -98,7 +99,7 @@ export const DiaryView: React.FC = () => {
 
   // Stats computation
   const totalHabits = osData?.habits?.length || 0;
-  const completedHabitsToday = osData?.habits?.filter(h => h.logs.includes(todayStr)).length || 0;
+  const completedHabitsToday = osData?.habits?.filter(h => safeLogs(h?.logs).includes(todayStr)).length || 0;
   const completedTasksToday = osData?.tasks?.filter(t => t.date === todayStr && t.status === "completed").length || 0;
 
   // Retrieve selected entry object

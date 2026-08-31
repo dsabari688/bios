@@ -3,6 +3,7 @@ import { Mic, Send, Trash2 } from "lucide-react";
 import { ChatMessage } from "../../types";
 import { useStore } from "../../store/useStore";
 import { formatTimestamp12Hour } from "../../lib/timeUtils";
+import { getApiBaseUrl } from "../../api/client";
 
 interface PiggyChatViewProps {
   chatHistory: ChatMessage[]; // <-- Kept as chatHistory here!
@@ -29,6 +30,7 @@ export const PiggyChatView: React.FC<PiggyChatViewProps> = ({
   const { showToast, osData, saveProfile, clearChatHistory } = useStore();
   // 👇 THE MAGIC LINK: Uses global data if it exists, falls back to local if not
   const activeHistory = osData?.chatHistory || chatHistory; 
+  const activationWord = osData?.profile?.activationWord || "piggy";
 
   const [inputText, setInputText] = useState("");
   const [piggyState, setPiggyState] = useState<"IDLE" | "PASSIVE_LISTENING" | "LISTENING" | "THINKING" | "SPEAKING">("IDLE");

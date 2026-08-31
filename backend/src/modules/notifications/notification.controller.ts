@@ -47,4 +47,22 @@ export const notificationController = {
       next(error);
     }
   },
+
+  async create(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const notification =
+        await notificationService.createNotification(req.body);
+
+      res.status(201).json({
+        success: true,
+        data: notification,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

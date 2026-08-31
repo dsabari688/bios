@@ -101,6 +101,17 @@ export function parseNormalizedTime(text: string): string | null {
 }
 
 /**
+ * Helper to format a Date as YYYY-MM-DD in local calendar date,
+ * avoiding UTC offset shifts caused by toISOString().
+ */
+export function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Parses and resolves date strings into YYYY-MM-DD.
  * Rejects impossible calendar dates (e.g. Feb 31).
  */
@@ -143,13 +154,13 @@ export function parseNormalizedDate(
   const today = new Date(referenceDate);
 
   if (/\b(today|tonight|this evening|this morning)\b/i.test(lower)) {
-    return { valid: true, date: today.toISOString().slice(0, 10) };
+    return { valid: true, date: formatLocalDate(today) };
   }
 
   if (/\b(tomorrow|tmrw|tosay)\b/i.test(lower)) {
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
-    return { valid: true, date: tomorrow.toISOString().slice(0, 10) };
+    return { valid: true, date: formatLocalDate(tomorrow) };
   }
 
   const monthNames = [
@@ -189,7 +200,7 @@ export function parseNormalizedDate(
 
       const resultDate = new Date(today);
       resultDate.setDate(today.getDate() + diff);
-      return { valid: true, date: resultDate.toISOString().slice(0, 10) };
+      return { valid: true, date: formatLocalDate(resultDate) };
     }
   }
 
@@ -197,25 +208,26 @@ export function parseNormalizedDate(
 }
 
 /**
- * Resolves date and time together with past-time rollover policy:
- * If user asks for a time today that has already passed, rolls over to tomorrow.
+ * Resolves date and time together.
+ * Relative date words ("today", "tomorrow") resolve against referenceDate without rolling forward.
+ * Past-time rollover applies ONLY when no date input is specified.
  */
 export function resolveDateAndTime(
   dateInput?: string,
   timeInput?: string,
   referenceDate: Date = new Date(),
 ): NormalizedDateTime {
-  let resolvedDate = dateInput ? parseNormalizedDate(dateInput, referenceDate) : { valid: true, date: referenceDate.toISOString().slice(0, 10) };
+  let resolvedDate = dateInput ? parseNormalizedDate(dateInput, referenceDate) : { valid: true, date: formatLocalDate(referenceDate) };
   const resolvedTime = timeInput ? parseNormalizedTime(timeInput) : undefined;
 
   if (!resolvedDate.valid) {
     return { valid: false, error: resolvedDate.error };
   }
 
-  let dateStr = resolvedDate.date ?? referenceDate.toISOString().slice(0, 10);
+  let dateStr = resolvedDate.date ?? formatLocalDate(referenceDate);
 
-  // Past time rollover check for today
-  if (resolvedTime && dateStr === referenceDate.toISOString().slice(0, 10)) {
+  // Past time rollover applies ONLY if date was NOT explicitly specified
+  if (!dateInput && resolvedTime && dateStr === formatLocalDate(referenceDate)) {
     const [h, m] = resolvedTime.split(":").map(Number);
     const targetMoment = new Date(referenceDate);
     targetMoment.setHours(h, m, 0, 0);
@@ -224,8 +236,8 @@ export function resolveDateAndTime(
     if (targetMoment.getTime() < referenceDate.getTime() - 15 * 60 * 1000) {
       const tomorrow = new Date(referenceDate);
       tomorrow.setDate(referenceDate.getDate() + 1);
-      dateStr = tomorrow.toISOString().slice(0, 10);
-      console.log(`[PIGGY][DATE-NORMALIZER] Past time ${resolvedTime} requested today. Rolling over date to ${dateStr}`);
+      dateStr = formatLocalDate(tomorrow);
+      console.log(`[PIGGY][DATE-NORMALIZER] Past time ${resolvedTime} requested with no date. Rolling over date to ${dateStr}`);
     }
   }
 

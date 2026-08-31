@@ -136,3 +136,15 @@ export interface FullOSData {
   diaryEntries?: DiaryEntry[]; // <-- Added Nightly Diary Support!
 }
 
+export function safeLogs(logs: unknown): string[] {
+  if (Array.isArray(logs)) return logs;
+  if (typeof logs === "string") {
+    try {
+      const parsed = JSON.parse(logs);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return [];
+}
+
+

@@ -18,7 +18,7 @@ import {
   Target,
   Info
 } from "lucide-react";
-import { Habit } from "../../types";
+import { Habit, safeLogs } from "../../types";
 
 interface HabitsViewProps {
   habits: Habit[];
@@ -526,7 +526,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
       {/* Active habits display grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {habits.map((item) => {
-          const isDoneToday = item.logs.includes(effectiveDate);
+          const isDoneToday = safeLogs(item?.logs).includes(effectiveDate);
           const iconEmoji = item.icon || getHabitIcon(item.name);
           
           const isSelected = selectedHabitId === item.id;

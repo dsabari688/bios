@@ -1,5 +1,4 @@
-// Life OS Model Context Protocol (MCP) & AI Tool Bridge Specification
-// Implements MCP 2024-11-05 Specification + REST Bridge for external AI agents, Cursor, Claude Desktop, and in-app Piggy/JARVIS AI
+import { safeLogs } from "../types";
 
 export interface MCPToolDefinition {
   name: string;
@@ -544,7 +543,7 @@ export function executeMCPTool(
         const habits = osData.habits || [];
         const enriched = habits.map(h => ({
           ...h,
-          loggedToday: h.logs.includes(todayStr)
+          loggedToday: safeLogs(h?.logs).includes(todayStr)
         }));
         return {
           success: true,
@@ -811,7 +810,7 @@ export function executeMCPTool(
           : (tasks.length > 0 ? Math.round((tasks.filter((t: any) => t.status === "completed").length / tasks.length) * 100) : 0);
 
         const habitRate = habits.length > 0
-          ? Math.round((habits.filter((h: any) => h.logs.includes(todayStr)).length / habits.length) * 100)
+          ? Math.round((habits.filter((h: any) => safeLogs(h?.logs).includes(todayStr)).length / habits.length) * 100)
           : 0;
 
         const goalRate = goals.length > 0

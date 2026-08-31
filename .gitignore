@@ -20,5 +20,6 @@ release-electron/
 *.tmp
 *.exe
 win-unpacked*
-# Temporary debug screenshots
-*.png
+# Database backup exports
+scripts/backups/
+

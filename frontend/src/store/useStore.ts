@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { FullOSData, Task, Habit, Goal, Expense, ChatMessage, SystemNotification, DiaryEntry, UserProfile } from "../types";
+import { FullOSData, Task, Habit, Goal, Expense, ChatMessage, SystemNotification, DiaryEntry, UserProfile, safeLogs } from "../types";
 import { executeMCPTool, MCP_TOOLS_REGISTRY } from "../lib/mcpBridge";
 import { goalService } from "../services/goalService";
 import { habitService } from "../services/habitService";
@@ -1520,7 +1520,7 @@ export const useStore = create<StoreState>((set, get) => {
         const timestamp = new Date().toISOString();
         
         const totalHabits = data.habits.length;
-        const completedHabits = data.habits.filter(h => h.logs.includes(todayStr)).length;
+        const completedHabits = data.habits.filter(h => safeLogs(h?.logs).includes(todayStr)).length;
         const pendingTasks = data.tasks.filter(t => t.status === "pending").length;
         const completedTasksToday = data.tasks.filter(t => t.date === todayStr && t.status === "completed").length;
         

@@ -20,6 +20,8 @@ export interface PendingAction {
   lastQuestion?: string;
   /** If true, the last question was a confirmation (expecting yes/no) */
   awaitingConfirmation?: boolean;
+  /** Map of slot key to retry counts (number of times user was prompted for this slot) */
+  slotRetryCounts?: Record<string, number>;
   /** Timestamp when state was created/updated */
   updatedAt?: number;
 }

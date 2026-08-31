@@ -1,7 +1,7 @@
 import { habitRepository } from "../db/repositories/habitRepository";
 import { habitsApi } from "../api/habits.api";
 import { syncManager } from "../sync/syncManager";
-import type { Habit } from "../types";
+import { Habit, safeLogs } from "../types";
 
 export const habitService = {
   async getAll(): Promise<Habit[]> {
@@ -77,8 +77,9 @@ export const habitService = {
     const habit = await habitRepository.getById(id);
     if (!habit) return undefined;
 
-    const hasLog = habit.logs.includes(date);
-    const newLogs = hasLog ? habit.logs.filter((d) => d !== date) : [...habit.logs, date];
+    const logsArr = safeLogs(habit?.logs);
+    const hasLog = logsArr.includes(date);
+    const newLogs = hasLog ? logsArr.filter((d) => d !== date) : [...logsArr, date];
     const newStreak = newLogs.length;
 
     return this.update(id, {
