@@ -35,7 +35,7 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  return "/api";
+  return "https://bios-backend-93q3.onrender.com/api";
 }
 
 export function setCustomServerUrl(url: string | null): void {
