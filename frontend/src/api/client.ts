@@ -18,23 +18,7 @@ export function getApiBaseUrl(): string {
     return clean.endsWith("/api") ? clean : `${clean}/api`;
   }
 
-  // Handle Electron desktop app & Capacitor mobile native environment
-  if (typeof window !== "undefined") {
-    const isCapacitor = !!(window as any).Capacitor || window.location.protocol === "capacitor:";
-    const isFileOrElectron =
-      window.location.protocol === "file:" ||
-      (typeof navigator !== "undefined" && navigator.userAgent.includes("Electron"));
-
-    if (isFileOrElectron) {
-      return "http://localhost:5000/api";
-    }
-
-    if (isCapacitor) {
-      // In Capacitor native mobile app, if no server URL configured, fallback to the PC server IP
-      return "http://10.239.162.231:5000/api";
-    }
-  }
-
+  // Universal Cloud Live Backend URL (Connects Laptop, Desktop App & Mobile Phone to Supabase DB)
   return "https://bios-backend-93q3.onrender.com/api";
 }
 
