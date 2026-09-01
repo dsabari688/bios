@@ -4,7 +4,7 @@ import {
   taskCategoryToFront,
   type CreateTaskPayload,
 } from "../api/tasks.api";
-import { API_BASE } from "../api/client";
+import { getApiBaseUrl } from "../api/client";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,10 +38,13 @@ function splitDateTime(iso: string): { date: string; time: string } {
     ? dateMatch[1]
     : `${new Date().getFullYear()}-${pad(new Date().getMonth() + 1)}-${pad(new Date().getDate())}`;
 
-  const d = new Date(iso);
-  const timeStr = !isNaN(d.getTime())
-    ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
-    : "09:00";
+  let timeStr = "09:00";
+  if (iso.includes("T")) {
+    const d = new Date(iso);
+    if (!isNaN(d.getTime())) {
+      timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
 
   return {
     date: dateStr,
@@ -119,7 +122,8 @@ export function taskToBackendPayload(task: Partial<Task>): Record<string, unknow
 
 async function api<T = unknown>(path: string, method: string, body?: unknown): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const baseUrl = getApiBaseUrl();
+    const res = await fetch(`${baseUrl}${path}`, {
       method,
       headers: { "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined

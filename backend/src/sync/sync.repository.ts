@@ -66,8 +66,23 @@ export const syncRepository = {
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     };
 
+    const normalizeCategory = (cat: any): string => {
+      if (!cat || typeof cat !== "string") return "important-not-urgent";
+      const map: Record<string, string> = {
+        "urgent-important": "important-urgent",
+        "important-urgent": "important-urgent",
+        "important-not-urgent": "important-not-urgent",
+        "urgent-not-important": "not-important-urgent",
+        "not-important-urgent": "not-important-urgent",
+        "not-urgent-not-important": "not-important-not-urgent",
+        "not-important-not-urgent": "not-important-not-urgent",
+      };
+      return map[cat] || "important-not-urgent";
+    };
+
     const dateOnly = normalizeToDateOnly(payload.date);
     const endTimeRaw = safeDate(payload.endTime);
+    const category = normalizeCategory(payload.category);
 
     const result = await pool.query(
       `
@@ -93,7 +108,7 @@ export const syncRepository = {
         payload.title || "Untitled Task",
         payload.description || null,
         payload.status || "pending",
-        payload.category || "important-not-urgent",
+        category,
         dateOnly + "T12:00:00.000Z",
         endTimeRaw,
         payload.rescheduledCount || 0,
@@ -284,9 +299,11 @@ export const syncRepository = {
   },
 
   async getChangesSince(cursorTime?: string) {
-    const since = cursorTime && !isNaN(new Date(cursorTime).getTime())
-      ? new Date(cursorTime).toISOString()
-      : "1970-01-01T00:00:00.000Z";
+    let since = "1970-01-01T00:00:00.000Z";
+    if (cursorTime && !isNaN(new Date(cursorTime).getTime())) {
+      const cursorMs = new Date(cursorTime).getTime();
+      since = new Date(Math.max(0, cursorMs - 5000)).toISOString();
+    }
 
     await pool.query(`CREATE TABLE IF NOT EXISTS "deleted_records" ("id" TEXT PRIMARY KEY, "entity" TEXT NOT NULL, "entityId" TEXT NOT NULL, "deletedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
 

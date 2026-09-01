@@ -17,7 +17,9 @@ export default defineConfig(() => {
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: {
+        ignored: ['**/release-win/**', '**/release-electron/**', '**/android/**', '**/dist-electron/**'],
+      },
       proxy: {
         '/api': {
           target: 'http://localhost:5000',

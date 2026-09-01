@@ -62,13 +62,9 @@ async function mockFetchHandler(
     const storedData = getStoredData();
     const userName = storedData?.profile?.name || "Sabarinathan";
 
-    // Pass through to the real backend (via Vite proxy) for implemented routes
+    // Pass through to the real backend for implemented routes
     if (REAL_BACKEND_ROUTES.some((route) => path === route || path.startsWith(route + "/"))) {
-      try {
-        return await originalFetch(url, options);
-      } catch (err) {
-        console.warn("[mockApi] Real backend unreachable, falling back to client mock handler for", path);
-      }
+      return originalFetch(url, options);
     }
 
     let responseData: any = null;

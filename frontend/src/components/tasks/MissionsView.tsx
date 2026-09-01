@@ -151,8 +151,8 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
 
   // Sort and group tasks by Date
   const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
-    const aDate = String(a?.date || "");
-    const bDate = String(b?.date || "");
+    const aDate = normalizeDate(a?.date);
+    const bDate = normalizeDate(b?.date);
     const dateCompare = aDate.localeCompare(bDate);
     if (dateCompare !== 0) return dateCompare;
     
@@ -169,7 +169,7 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
 
   const groupedTasks: Record<string, Task[]> = {};
   sortedFilteredTasks.forEach((task) => {
-    const taskDateKey = String(task?.date || "");
+    const taskDateKey = normalizeDate(task?.date);
     if (!groupedTasks[taskDateKey]) {
       groupedTasks[taskDateKey] = [];
     }

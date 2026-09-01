@@ -50,7 +50,7 @@ export class SyncEngine {
       await syncQueue.markSyncing(pending.map((p) => p.id));
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const res = await fetch(`${baseUrl}/sync/push`, {
         method: "POST",
@@ -125,7 +125,7 @@ export class SyncEngine {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const res = await fetch(`${baseUrl}/sync/pull`, {
         method: "POST",
@@ -186,6 +186,7 @@ export class SyncEngine {
   }
 
   private async saveLocalEntity(entity: string, data: any) {
+    let itemToSync = data;
     switch (entity) {
       case "task": {
         const existing = await taskRepository.getById(data.id);
@@ -202,7 +203,8 @@ export class SyncEngine {
           time: data.time || "09:00",
           status: data.status === "completed" ? "completed" : "pending",
         };
-        if (existing && existing.title === normalized.title && existing.status === normalized.status && existing.date === normalized.date) {
+        itemToSync = normalized;
+        if (existing && existing.title === normalized.title && existing.status === normalized.status && existing.date === normalized.date && existing.category === normalized.category) {
           // Already identical locally, skip duplicate save to prevent re-hydration loops
           break;
         }
@@ -226,7 +228,7 @@ export class SyncEngine {
         await notificationRepository.save(data, true);
         break;
     }
-    this.syncToLocalStorage(entity, data);
+    this.syncToLocalStorage(entity, itemToSync);
   }
 
   private syncToLocalStorage(entity: string, item: any) {

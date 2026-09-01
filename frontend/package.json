@@ -14,7 +14,7 @@
     "android:add": "cap add android",
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android",
-    "android:build": "npm run android:sync && cd android && ./gradlew assembleDebug",
+    "android:build": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "android:build:release": "npm run android:sync && cd android && ./gradlew assembleRelease bundleRelease",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js dist-electron dist-electron-build",

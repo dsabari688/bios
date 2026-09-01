@@ -125,28 +125,45 @@ export const SyncStatusBadge: React.FC = () => {
                   Save
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  const url = "http://10.239.162.231:5000";
-                  setServerUrl(url);
-                  setCustomServerUrl(url);
-                  const reachable = await connectionMonitor.checkServerHealth();
-                  if (reachable) {
-                    syncNow();
-                    setSavedNotice(true);
-                  }
-                }}
-                className="text-[10px] text-amber-400 hover:underline font-mono block cursor-pointer"
-              >
-                ⚡ Click here to set Real PC IP: http://10.239.162.231:5000
-              </button>
+              <div className="flex flex-col gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const url = "http://10.239.162.231:5000";
+                    setServerUrl(url);
+                    setCustomServerUrl(url);
+                    const reachable = await connectionMonitor.checkServerHealth();
+                    if (reachable) {
+                      syncNow();
+                      setSavedNotice(true);
+                    }
+                  }}
+                  className="text-[10px] text-amber-500 hover:underline font-mono text-left cursor-pointer"
+                >
+                  ⚡ Click here to set Local PC IP: http://10.239.162.231:5000
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setServerUrl("");
+                    setCustomServerUrl(null);
+                    const reachable = await connectionMonitor.checkServerHealth();
+                    if (reachable) {
+                      syncNow();
+                      setSavedNotice(true);
+                    }
+                  }}
+                  className="text-[10px] text-emerald-500 hover:underline font-mono text-left cursor-pointer"
+                >
+                  🌐 Click here to set Live Cloud Server (Render / Supabase DB)
+                </button>
+              </div>
               {savedNotice && (
                 <p className="text-[10px] text-emerald-500 font-mono flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3" /> Server URL updated! Connected to PC.
+                  <CheckCircle className="w-3 h-3" /> Server URL updated! Health check complete.
                 </p>
               )}
-              <div className="text-[10px] font-mono text-slate-400">
+              <div className="text-[10px] font-mono text-slate-400 break-all">
                 Active Endpoint: <span className="text-slate-600 dark:text-slate-300 font-semibold">{getApiBaseUrl()}</span>
               </div>
             </div>

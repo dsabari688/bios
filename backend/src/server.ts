@@ -1,4 +1,8 @@
 import "dotenv/config";
+import dns from "node:dns";
+if (dns && typeof dns.setDefaultResultOrder === "function") {
+  dns.setDefaultResultOrder("ipv4first");
+}
 import app from "./app.js";
 import { startScheduler } from "./scheduler/scheduler.js";
 
