@@ -14,6 +14,10 @@ import systemConfigRoutes from "./modules/system-config/system-config.routes.js"
 
 const router = Router();
 
+router.get("/", (_req, res) => {
+  res.json({ success: true, message: "BIOS API Server is operational", version: "1.0.0" });
+});
+
 router.use("/moods", moodRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/goals", goalRoutes);

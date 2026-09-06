@@ -21,10 +21,11 @@ export function getCandidateUrls(): string[] {
     }
   }
 
-  // 2. Vite environment variable if provided
+  // 2. Vite environment variable or default Production Cloud Backend
   if (import.meta.env.VITE_API_URL) {
     candidates.push(normalizeApiUrl(import.meta.env.VITE_API_URL));
   }
+  candidates.push("https://biosbackend.onrender.com/api");
 
   // 3. Dynamic browser hostname if running on LAN
   if (typeof window !== "undefined") {
