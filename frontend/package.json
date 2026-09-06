@@ -1,7 +1,7 @@
 {
   "name": "bios-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite --port=9000 --host=0.0.0.0",
