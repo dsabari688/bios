@@ -21,7 +21,7 @@ export function getCandidateUrls(): string[] {
     }
   }
 
-  // 2. Vite environment variable or default Production Cloud Backend
+  // 2. Production Cloud Backend (Primary single source of truth for phone & laptop)
   if (import.meta.env.VITE_API_URL) {
     candidates.push(normalizeApiUrl(import.meta.env.VITE_API_URL));
   }
@@ -43,14 +43,6 @@ export function getCandidateUrls(): string[] {
     }
   }
 
-  // 4. USB cable reverse port-forwarding (127.0.0.1:5000 / localhost:5000)
-  candidates.push("http://127.0.0.1:5000/api");
-  candidates.push("http://localhost:5000/api");
-
-  // 5. Active LAN IP candidates
-  candidates.push("http://10.128.219.231:5000/api");
-  candidates.push("http://10.0.2.2:5000/api"); // Android emulator host loopback
-
   // Deduplicate
   return Array.from(new Set(candidates));
 }
@@ -60,7 +52,7 @@ export function getApiBaseUrl(): string {
     return cachedActiveBaseUrl;
   }
   const candidates = getCandidateUrls();
-  return candidates[0] || "http://127.0.0.1:5000/api";
+  return candidates[0] || "https://biosbackend.onrender.com/api";
 }
 
 export function setCustomServerUrl(url: string | null): void {
@@ -76,13 +68,13 @@ export function setCustomServerUrl(url: string | null): void {
   }
 }
 
-// Background probing of candidate URLs to find the fastest reachable server
+// Background probing of candidate URLs to verify connectivity
 export async function probeServerEndpoints(): Promise<string> {
   const candidates = getCandidateUrls();
   for (const candidate of candidates) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(`${candidate}/health`, {
         signal: controller.signal,
         headers: { Accept: "application/json" },
@@ -96,7 +88,7 @@ export async function probeServerEndpoints(): Promise<string> {
       // Continue to next candidate
     }
   }
-  return candidates[0] || "http://127.0.0.1:5000/api";
+  return candidates[0] || "https://biosbackend.onrender.com/api";
 }
 
 // Kick off probe immediately on load
