@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Smile, CheckCircle2, History, ChevronLeft, ChevronRight, TrendingUp, Sparkles, Brain } from "lucide-react";
 import { getApiBaseUrl } from "../../api/client";
-import { syncQueue } from "../../sync/syncQueue";
-import { syncManager } from "../../sync/syncManager";
+import { useStore } from "../../store/useStore";
 
 interface MoodTrackerProps {
   token?: string | null;
@@ -284,19 +283,7 @@ export default function MoodTracker({ token }: MoodTrackerProps) {
         console.warn("Direct mood save deferred:", err);
       }
 
-      // 3. Queue for sync manager
-      try {
-        await syncQueue.enqueue("mood", newEntry.id, "create", {
-          id: newEntry.id,
-          mood: selectedMood,
-          note: moodNote,
-          loggedAt: now.toISOString(),
-          createdAt: now.toISOString()
-        });
-        syncManager.triggerSync();
-      } catch (e) {
-        console.warn("Failed to enqueue mood sync:", e);
-      }
+      useStore.getState().hydrateSystemData();
 
       setNote("");
       setSelectedMood("");

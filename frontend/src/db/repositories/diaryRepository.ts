@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalDiaryEntry } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const diaryRepository = {
   async getAll(): Promise<LocalDiaryEntry[]> {
@@ -16,7 +15,6 @@ export const diaryRepository = {
 
   async save(entry: LocalDiaryEntry, isRemote: boolean = false): Promise<LocalDiaryEntry> {
     const now = new Date().toISOString();
-    const isNew = !(await db.diary.get(entry.id));
 
     // Remove any existing local entry for the exact same calendar date to avoid duplicate records
     if (entry.date) {
@@ -35,16 +33,6 @@ export const diaryRepository = {
     };
 
     await db.diary.put(localEntry);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "diary",
-        localEntry.id,
-        isNew ? "create" : "update",
-        localEntry
-      );
-    }
-
     return localEntry;
   },
 
@@ -59,22 +47,9 @@ export const diaryRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.diary.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.diary.delete(id);
-    } else {
-      const tombstoned: LocalDiaryEntry = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-        _updatedAt: now,
-      };
-      await db.diary.put(tombstoned);
-      await syncQueue.enqueue("diary", id, "delete", { id, deletedAt: now });
-    }
+    await db.diary.delete(id);
   },
 
   async markSynced(id: string, serverData?: Partial<LocalDiaryEntry>): Promise<void> {

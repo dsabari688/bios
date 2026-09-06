@@ -19,7 +19,12 @@ release-win/
 release-electron/
 *.tmp
 *.exe
+*.apk
 win-unpacked*
+# Temporary debug/inspection artifacts
+scratch/
+*.png
+*.xml
+capture_desktop.ps1
 # Database backup exports
 scripts/backups/
-

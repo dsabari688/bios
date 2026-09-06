@@ -7,7 +7,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import { useStore } from "../../store/useStore";
 import { formatTimestamp12Hour } from "../../lib/timeUtils";
-import { getApiBaseUrl } from "../../api/client";
+import { getApiBaseUrl, apiRequest } from "../../api/client";
 
 interface AIDashboardViewProps {
   token: string | null;
@@ -268,9 +268,8 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                         <button
                           onClick={async () => {
                             try {
-                              const res = await fetch("/api/piggy/feedback", {
+                              await apiRequest("/piggy/feedback", {
                                 method: "POST",
-                                headers: buildJsonHeaders(),
                                 body: JSON.stringify({
                                   text: h.risk.recommendation,
                                   type: "habit_timing",
@@ -278,9 +277,7 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                                   habitId: h.id
                                 })
                               });
-                              if (res.ok) {
-                                fetchAllData();
-                              }
+                              fetchAllData();
                             } catch (e) {
                               console.error("Failed to accept recommendation", e);
                             }
@@ -292,9 +289,8 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                         <button
                           onClick={async () => {
                             try {
-                              const res = await fetch("/api/piggy/feedback", {
+                              await apiRequest("/piggy/feedback", {
                                 method: "POST",
-                                headers: buildJsonHeaders(),
                                 body: JSON.stringify({
                                   text: h.risk.recommendation,
                                   type: "habit_timing",
@@ -302,9 +298,7 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                                   habitId: h.id
                                 })
                               });
-                              if (res.ok) {
-                                fetchAllData();
-                              }
+                              fetchAllData();
                             } catch (e) {
                               console.error("Failed to ignore recommendation", e);
                             }
@@ -748,13 +742,11 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                 if (!fact || !category) return;
                 
                 try {
-                  const res = await fetch("/api/piggy/memory", {
+                  const data = await apiRequest<any>("/piggy/memory", {
                     method: "POST",
-                    headers: buildJsonHeaders(),
                     body: JSON.stringify({ fact, category })
                   });
-                  const data = await res.json();
-                  if (data.success) {
+                  if (data?.success) {
                     setDashboardData((prev: any) => ({
                       ...prev,
                       aiMemory: [...(prev.aiMemory || []), data.fact]
@@ -804,13 +796,11 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ token, profile
                     <button 
                       onClick={async () => {
                         try {
-                          const res = await fetch(`/api/piggy/memory/${m.id}`, { method: "DELETE", headers });
-                          if (res.ok) {
-                            setDashboardData((prev: any) => ({
-                              ...prev,
-                              aiMemory: (prev.aiMemory || []).filter((item: any) => item.id !== m.id)
-                            }));
-                          }
+                          await apiRequest(`/piggy/memory/${m.id}`, { method: "DELETE" });
+                          setDashboardData((prev: any) => ({
+                            ...prev,
+                            aiMemory: (prev.aiMemory || []).filter((item: any) => item.id !== m.id)
+                          }));
                         } catch(e) { console.error(e); }
                       }}
                       className="text-[9px] font-mono text-slate-500 hover:text-rose-400 font-bold border border-slate-800 hover:border-rose-500/25 px-2 py-1 rounded transition-all cursor-pointer"

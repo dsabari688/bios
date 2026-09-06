@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle, Server, Wifi, Camera } from "lucide-react";
+import { User, Cpu, Bell, Shield, Palette, Check, Save, AlertTriangle, Camera } from "lucide-react";
 import { useStore } from "../../store/useStore";
-import { getApiBaseUrl, setCustomServerUrl } from "../../api/client";
-import { connectionMonitor } from "../../sync/connectionMonitor";
+import { getApiBaseUrl } from "../../api/client";
 
 interface SettingsViewProps {
   initialProfile: {
@@ -128,7 +127,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [email, setEmail] = useState(initialProfile.email);
   const [personality, setPersonality] = useState(initialProfile.aiPersonality);
   const [activationWord, setActivationWord] = useState(initialProfile.activationWord || "piggy");
-  const [serverIpUrl, setServerIpUrl] = useState(() => (typeof window !== "undefined" && window.localStorage ? localStorage.getItem("bios_server_url") || "" : ""));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,8 +151,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSaveServerIpUrl = () => {
     setCustomServerUrl(serverIpUrl);
-    connectionMonitor.checkServerHealth();
-    showToast("Server Host IP parameters updated. Triggered health check.", "success");
+    showToast("Server Host IP parameters updated.", "success");
   };
 
   // New J.A.R.V.I.S states
@@ -179,7 +176,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     missedAlerts: false,
     biometrics: true,
     faceUnlock: false,
-    darkMode: false,
+    darkMode: true,
     highContrast: false
   });
 
@@ -199,6 +196,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     const sourceConfig = systemConfig || initialProfile;
     if (sourceConfig) {
+      const isDark = (sourceConfig as any).darkMode ?? true;
       setToggles({
         proactiveSuggestions: sourceConfig.proactiveModeEnabled ?? true,
         dailyBriefing: true,
@@ -208,14 +206,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         missedAlerts: (sourceConfig as any).missedAlerts ?? false,
         biometrics: (sourceConfig as any).biometrics ?? true,
         faceUnlock: (sourceConfig as any).faceUnlock ?? false,
-        darkMode: (sourceConfig as any).darkMode ?? false,
+        darkMode: isDark,
         highContrast: (sourceConfig as any).highContrast ?? false,
       });
 
-      if ((sourceConfig as any).darkMode) {
+      if (isDark) {
         document.documentElement.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
       } else {
         document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
       }
     }
   }, [systemConfig, initialProfile]);
@@ -228,8 +228,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (key === "darkMode") {
         if (next.darkMode) {
           document.documentElement.classList.add('dark');
+          localStorage.setItem('theme', 'dark');
         } else {
           document.documentElement.classList.remove('dark');
+          localStorage.setItem('theme', 'light');
         }
       }
       

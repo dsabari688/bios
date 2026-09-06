@@ -9,7 +9,7 @@ import { budgetService } from "../services/budgetService";
 import { notificationService } from "../services/notificationService";
 import { systemConfigApi, type SystemConfig } from "../api/systemConfig.api";
 import { habitsApi } from "../api/habits.api";
-import { fetchGoals } from "../api/goals.api";
+import { fetchGoals, createGoal } from "../api/goals.api";
 import { expensesApi } from "../api/expenses.api";
 import { diaryApi } from "../api/diary.api";
 import { isUuid } from "../lib/taskSync";
@@ -19,7 +19,6 @@ import { habitRepository } from "../db/repositories/habitRepository";
 import { goalRepository } from "../db/repositories/goalRepository";
 import { expenseRepository } from "../db/repositories/expenseRepository";
 import { diaryRepository } from "../db/repositories/diaryRepository";
-import { syncManager } from "../sync/syncManager";
 import {
   backendToTask,
   fetchBackendTasks,
@@ -29,7 +28,7 @@ import {
   syncSetTaskStatus,
   syncUpdateTask
 } from "../lib/taskSync";
-import { getApiBaseUrl } from "../api/client";
+import { getApiBaseUrl, apiRequest } from "../api/client";
 
 export interface ToastMessage {
   id: string;
@@ -151,6 +150,7 @@ export interface StoreState {
   
   // Profile & System Actions
   saveProfile: (profileData: {
+    avatar?: string;
     name: string;
     email: string;
     budgetLimit: number;
@@ -269,7 +269,7 @@ function getOSDataFromStoreOrLocalStorage(set: any, get: () => StoreState): Full
 }
 
 export const useStore = create<StoreState>((set, get) => {
-  // Setup offline listeners
+  // Setup offline listeners, focus/visibility triggers & 3s live cross-device sync auto-refresh
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => {
       set({ isOffline: false });
@@ -280,6 +280,42 @@ export const useStore = create<StoreState>((set, get) => {
       set({ isOffline: true });
       get().showToast("Uplink severed. Running in offline mode.", "warning");
     });
+
+    // Instant sync when user switches back to the app (phone or desktop)
+    window.addEventListener("focus", () => {
+      if (get && typeof get === "function" && get().token && !get().isOffline) {
+        get().hydrateSystemData().catch(() => {});
+      }
+    });
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          if (get && typeof get === "function" && get().token && !get().isOffline) {
+            get().hydrateSystemData().catch(() => {});
+          }
+        }
+      });
+    }
+
+    // Cross-tab / cross-window broadcast channel for instant notification
+    try {
+      if ("BroadcastChannel" in window) {
+        const syncChannel = new BroadcastChannel("bios_cross_sync");
+        syncChannel.onmessage = (event) => {
+          if (event.data === "data_updated" && get && typeof get === "function") {
+            get().hydrateSystemData().catch(() => {});
+          }
+        };
+      }
+    } catch {}
+
+    // 3-second rapid bidirectional poll for real-time synchronization between Windows and Mobile
+    setInterval(() => {
+      if (get && typeof get === "function" && get().token && !get().isOffline) {
+        get().hydrateSystemData().catch(() => {});
+      }
+    }, 3000);
   }
 
   return {
@@ -451,7 +487,7 @@ export const useStore = create<StoreState>((set, get) => {
             } else {
               const rawDate = local.date || new Date().toISOString();
               const dateStr = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate;
-              mergedTasks.push({
+              const formattedLocal: Task = {
                 id: local.id,
                 title: local.title,
                 description: local.description,
@@ -462,7 +498,17 @@ export const useStore = create<StoreState>((set, get) => {
                 recurType: local.recurType || "none",
                 status: local.status === "completed" ? "completed" : "pending",
                 rescheduledCount: local.rescheduledCount || 0,
-              });
+              };
+              mergedTasks.push(formattedLocal);
+
+              // Auto-sync pending local task to cloud backend so phone and laptop both receive it
+              void syncCreateTask(formattedLocal).then(async (serverId) => {
+                if (serverId) {
+                  await taskRepository.remove(local.id, true).catch(() => {});
+                  formattedLocal.id = serverId;
+                  await taskRepository.save(formattedLocal as any, true).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
@@ -488,12 +534,18 @@ export const useStore = create<StoreState>((set, get) => {
               await habitRepository.remove(lh.id, true).catch(() => {});
             } else {
               mergedHabits.push(lh as any);
+              void habitsApi.create(lh as any).then(async (created) => {
+                if (created && created.id) {
+                  await habitRepository.remove(lh.id, true).catch(() => {});
+                  await habitRepository.save(created as any, true).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
         data.habits = mergedHabits;
       } else {
-        console.warn("Habit hydration deferred/offline:", habitsRes.reason);
+        console.warn("Habit hydration deferred/offline:", habitsRes.status === "rejected" ? habitsRes.reason : undefined);
         const localHabits = await habitRepository.getAll();
         data.habits = localHabits.filter((h) => !(h as any)._deletedAt) as any;
       }
@@ -511,12 +563,24 @@ export const useStore = create<StoreState>((set, get) => {
               await goalRepository.remove(lg.id, true).catch(() => {});
             } else {
               mergedGoals.push(lg as any);
+              void createGoal({
+                title: lg.title,
+                description: lg.description,
+                targetDate: lg.targetDate,
+                progress: lg.progress,
+                status: lg.status
+              }).then(async (created) => {
+                if (created && created.id) {
+                  await goalRepository.remove(lg.id, true).catch(() => {});
+                  await goalRepository.save(created as any, true).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
         data.goals = mergedGoals;
       } else {
-        console.warn("Goal hydration deferred/offline:", goalsRes.reason);
+        console.warn("Goal hydration deferred/offline:", goalsRes.status === "rejected" ? goalsRes.reason : undefined);
         const localGoals = await goalRepository.getAll();
         data.goals = localGoals.filter((g) => !(g as any)._deletedAt) as any;
       }
@@ -534,12 +598,24 @@ export const useStore = create<StoreState>((set, get) => {
               await expenseRepository.remove(le.id, true).catch(() => {});
             } else {
               mergedExpenses.push(le as any);
+              void expensesApi.create({
+                amount: le.amount,
+                category: le.category,
+                note: le.note,
+                date: le.date,
+                isImpulsive: le.isImpulsive
+              }).then(async (created) => {
+                if (created && created.id) {
+                  await expenseRepository.remove(le.id, true).catch(() => {});
+                  await expenseRepository.save(created as any, true).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
         data.expenses = mergedExpenses;
       } else {
-        console.warn("Expense hydration deferred/offline:", expensesRes.reason);
+        console.warn("Expense hydration deferred/offline:", expensesRes.status === "rejected" ? expensesRes.reason : undefined);
         const localExpenses = await expenseRepository.getAll();
         data.expenses = localExpenses.filter((e) => !(e as any)._deletedAt) as any;
       }
@@ -547,7 +623,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (budgetsRes.status === "fulfilled") {
         data.budgets = budgetsRes.value;
       } else {
-        console.warn("Budget hydration deferred/offline:", budgetsRes.reason);
+        console.warn("Budget hydration deferred/offline:", budgetsRes.status === "rejected" ? budgetsRes.reason : undefined);
         data.budgets = cached?.budgets ?? [];
       }
 
@@ -564,13 +640,26 @@ export const useStore = create<StoreState>((set, get) => {
               await diaryRepository.remove(ld.id, true).catch(() => {});
             } else {
               mergedDiary.push(ld as any);
+              void diaryApi.create({
+                date: ld.date,
+                timestamp: ld.timestamp,
+                content: ld.content,
+                review: ld.review,
+                mood: ld.mood,
+                productivityScore: ld.productivityScore
+              }).then(async (created) => {
+                if (created && created.id) {
+                  await diaryRepository.remove(ld.id, true).catch(() => {});
+                  await diaryRepository.save(created as any, true).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
-        mergedDiary.sort((a, b) => String(b ? (b?.timestamp || b?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || a?.createdAt || "") : "")));
+        mergedDiary.sort((a, b) => String(b ? (b?.timestamp || (b as any)?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || (a as any)?.createdAt || "") : "")));
         data.diaryEntries = mergedDiary;
       } else {
-        console.warn("Diary hydration deferred/offline:", diaryRes.reason);
+        console.warn("Diary hydration deferred/offline:", diaryRes.status === "rejected" ? diaryRes.reason : undefined);
         const localDiary = await diaryRepository.getAll();
         data.diaryEntries = localDiary.filter((d) => !(d as any)._deletedAt) as any;
       }
@@ -582,7 +671,7 @@ export const useStore = create<StoreState>((set, get) => {
         );
         data.notifications = [...backendNotifications, ...localOnly];
       } else {
-        console.warn("Notification hydration deferred/offline:", notifsRes.reason);
+        console.warn("Notification hydration deferred/offline:", notifsRes.status === "rejected" ? notifsRes.reason : undefined);
         data.notifications = cached?.notifications ?? [];
       }
 
@@ -607,17 +696,20 @@ export const useStore = create<StoreState>((set, get) => {
           missedAlerts: loadedConfig.missedAlerts,
           biometrics: loadedConfig.biometrics,
           faceUnlock: loadedConfig.faceUnlock,
-          darkMode: loadedConfig.darkMode,
-          highContrast: loadedConfig.highContrast,
+          darkMode: loadedConfig.darkMode ?? true,
+          highContrast: loadedConfig.highContrast ?? false,
         };
 
-        if (loadedConfig.darkMode) {
+        const isDark = loadedConfig.darkMode ?? true;
+        if (isDark) {
           document.documentElement.classList.add("dark");
+          localStorage.setItem("theme", "dark");
         } else {
           document.documentElement.classList.remove("dark");
+          localStorage.setItem("theme", "light");
         }
       } else {
-        console.warn("System config hydration deferred/offline:", sysConfigRes.reason);
+        console.warn("System config hydration deferred/offline:", sysConfigRes.status === "rejected" ? sysConfigRes.reason : undefined);
       }
 
       localStorage.setItem("lifeos_data", JSON.stringify(data));
@@ -673,7 +765,7 @@ export const useStore = create<StoreState>((set, get) => {
         set({ osData: { ...data } });
 
         await taskRepository.save(task);
-        syncManager.triggerSync();
+        get().hydrateSystemData();
 
         if (task.status === "completed") {
           syncCompleteTask(taskId);
@@ -732,7 +824,26 @@ export const useStore = create<StoreState>((set, get) => {
 
         if (savedTask) {
           await taskRepository.save(savedTask);
-          syncManager.triggerSync();
+
+          if (isNew) {
+            const serverId = await syncCreateTask(savedTask);
+            if (serverId) {
+              await taskRepository.remove(savedTask.id).catch(() => {});
+              const oldId = savedTask.id;
+              savedTask.id = serverId;
+              await taskRepository.save(savedTask, true);
+              const idx = data.tasks.findIndex((t) => t.id === oldId);
+              if (idx !== -1) {
+                data.tasks[idx].id = serverId;
+              }
+              localStorage.setItem("lifeos_data", JSON.stringify(data));
+              set({ osData: { ...data } });
+            }
+          } else {
+            syncUpdateTask(savedTask.id, savedTask);
+          }
+
+          get().hydrateSystemData();
         }
 
         get().showToast(
@@ -787,7 +898,7 @@ export const useStore = create<StoreState>((set, get) => {
         });
 
         await taskRepository.save(task);
-        syncManager.triggerSync();
+        get().hydrateSystemData();
 
         const maxLimit = task.maxDeferLimit || 3;
         if (task.rescheduledCount >= maxLimit) {
@@ -836,7 +947,7 @@ export const useStore = create<StoreState>((set, get) => {
         data.tasks = data.tasks.filter((t) => t.id !== taskId);
         syncDeleteTask(taskId);
         await taskRepository.remove(taskId);
-        syncManager.triggerSync();
+        get().hydrateSystemData();
 
         localStorage.setItem("lifeos_data", JSON.stringify(data));
         set({ osData: { ...data } });
@@ -1325,22 +1436,14 @@ export const useStore = create<StoreState>((set, get) => {
     logFocusSession: async (minutes, score) => {
       try {
         const todayStr = get().selectedDate || new Date().toISOString().split("T")[0];
-        const baseUrl = getApiBaseUrl();
-        const res = await fetch(`${baseUrl}/piggy/focus-log`, {
+        const data = await apiRequest<any>("/piggy/focus-log", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             minutes,
             score,
             date: todayStr
           })
         });
-
-        if (!res.ok) {
-          throw new Error(`Focus log API responded ${res.status}`);
-        }
-
-        const data = await res.json();
 
         get().showToast(`Deep Work Block completed! Banked ${minutes} mins focus.`, "success");
 
@@ -1350,7 +1453,7 @@ export const useStore = create<StoreState>((set, get) => {
 
         return {
           success: true,
-          summary: data.summary || {
+          summary: data?.summary || {
             todayCompletedBlocks: 1,
             todayTotalMinutes: minutes
           }
@@ -1654,7 +1757,7 @@ export const useStore = create<StoreState>((set, get) => {
                 innerData.diaryEntries = innerData.diaryEntries || [];
                 innerData.diaryEntries = innerData.diaryEntries.filter(e => e.date !== entry.date || e.id === entry.id);
                 innerData.diaryEntries.push(entry);
-                innerData.diaryEntries.sort((a, b) => String(b ? (b?.timestamp || b?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || a?.createdAt || "") : "")));
+                innerData.diaryEntries.sort((a, b) => String(b ? (b?.timestamp || (b as any)?.createdAt || "") : "").localeCompare(String(a ? (a?.timestamp || (a as any)?.createdAt || "") : "")));
                 localStorage.setItem("lifeos_data", JSON.stringify(innerData));
                 set({ osData: innerData });
               }

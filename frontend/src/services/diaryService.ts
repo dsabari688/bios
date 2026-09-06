@@ -1,6 +1,6 @@
 import { diaryRepository } from "../db/repositories/diaryRepository";
 import { diaryApi } from "../api/diary.api";
-import { syncManager } from "../sync/syncManager";
+import { useStore } from "../store/useStore";
 import type { DiaryEntry } from "../types";
 
 export const diaryService = {
@@ -51,7 +51,7 @@ export const diaryService = {
     } catch (e) {
       console.warn("Direct diary create deferred:", e);
     }
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -62,7 +62,7 @@ export const diaryService = {
     } catch (e) {
       console.warn("Direct diary delete deferred:", e);
     }
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return { id };
   },
 };

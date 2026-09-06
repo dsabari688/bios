@@ -562,9 +562,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             ) : (
               sortedDayTasks.map((task) => {
                 const isCompleted = task.status === "completed";
-                const isCritical = task.category === "urgent-important" || task.category === "important-urgent";
+                const isCritical = task.category === "urgent-important" || (task.category as string) === "important-urgent";
                 const isImportant = task.category === "important-not-urgent";
-                const isUrgentMinor = task.category === "urgent-not-important" || task.category === "not-important-urgent";
+                const isUrgentMinor = task.category === "urgent-not-important" || (task.category as string) === "not-important-urgent";
 
                 let priorityLabel = "Low";
                 let priorityColor = "bg-slate-50 text-slate-500 border-slate-100";

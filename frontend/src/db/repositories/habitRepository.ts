@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalHabit } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const habitRepository = {
   async getAll(): Promise<LocalHabit[]> {
@@ -16,7 +15,6 @@ export const habitRepository = {
 
   async save(habit: LocalHabit, isRemote: boolean = false): Promise<LocalHabit> {
     const now = new Date().toISOString();
-    const isNew = !(await db.habits.get(habit.id));
 
     const localHabit: LocalHabit = {
       ...habit,
@@ -26,16 +24,6 @@ export const habitRepository = {
     };
 
     await db.habits.put(localHabit);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "habit",
-        localHabit.id,
-        isNew ? "create" : "update",
-        localHabit
-      );
-    }
-
     return localHabit;
   },
 
@@ -50,22 +38,9 @@ export const habitRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.habits.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.habits.delete(id);
-    } else {
-      const tombstoned: LocalHabit = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-        _updatedAt: now,
-      };
-      await db.habits.put(tombstoned);
-      await syncQueue.enqueue("habit", id, "delete", { id, deletedAt: now });
-    }
+    await db.habits.delete(id);
   },
 
   async markSynced(id: string, serverData?: Partial<LocalHabit>): Promise<void> {

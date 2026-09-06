@@ -1,9 +1,18 @@
 import { expenseRepository } from "../db/repositories/expenseRepository";
-import { syncManager } from "../sync/syncManager";
+import { expensesApi } from "../api/expenses.api";
+import { useStore } from "../store/useStore";
 import type { Expense, ExpenseCategory } from "../types";
 
 export const expenseService = {
   async getAll(): Promise<Expense[]> {
+    try {
+      const remote = await expensesApi.getAll();
+      if (Array.isArray(remote) && remote.length > 0) {
+        for (const e of remote) {
+          await expenseRepository.save(e as any, true).catch(() => {});
+        }
+      }
+    } catch {}
     return expenseRepository.getAll() as Promise<Expense[]>;
   },
 
@@ -28,7 +37,25 @@ export const expenseService = {
     };
 
     const saved = await expenseRepository.save(newExpense);
-    syncManager.triggerSync();
+    try {
+      const remote = await expensesApi.create({
+        amount: newExpense.amount,
+        category: newExpense.category,
+        note: newExpense.note,
+        date: newExpense.date,
+        isImpulsive: newExpense.isImpulsive,
+      });
+      if (remote && remote.id && remote.id !== newExpense.id) {
+        await expenseRepository.remove(newExpense.id);
+        const updatedLocal = { ...newExpense, id: remote.id };
+        await expenseRepository.save(updatedLocal as any, true);
+        useStore.getState().hydrateSystemData();
+        return updatedLocal;
+      }
+    } catch (e) {
+      console.warn("Direct expense create deferred:", e);
+    }
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -38,13 +65,23 @@ export const expenseService = {
 
     const updated = { ...existing, ...data };
     const saved = await expenseRepository.save(updated);
-    syncManager.triggerSync();
+    try {
+      await expensesApi.update(id, data);
+    } catch (e) {
+      console.warn("Direct expense update deferred:", e);
+    }
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
   async delete(id: string): Promise<{ id: string }> {
     await expenseRepository.remove(id);
-    syncManager.triggerSync();
+    try {
+      await expensesApi.delete(id);
+    } catch (e) {
+      console.warn("Direct expense delete deferred:", e);
+    }
+    useStore.getState().hydrateSystemData();
     return { id };
   },
 };

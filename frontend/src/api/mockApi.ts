@@ -29,7 +29,8 @@ const REAL_BACKEND_ROUTES = [
   "/api/expenses",
   "/api/budgets",
   "/api/diary",
-  "/api/piggy"
+  "/api/piggy",
+  "/api/system-config"
 ];
 
 const getStoredData = (): any => {
@@ -76,8 +77,8 @@ async function mockFetchHandler(
         success: true,
         status: "healthy",
         message: "LifeOS backend / mock engine active",
-        localIp: "10.239.162.231",
-        serverUrl: "http://10.239.162.231:5000"
+        localIp: "10.93.136.231",
+        serverUrl: "http://10.93.136.231:5000"
       };
     }
     

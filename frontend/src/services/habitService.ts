@@ -1,6 +1,6 @@
 import { habitRepository } from "../db/repositories/habitRepository";
 import { habitsApi } from "../api/habits.api";
-import { syncManager } from "../sync/syncManager";
+import { useStore } from "../store/useStore";
 import { Habit, safeLogs } from "../types";
 
 export const habitService = {
@@ -54,7 +54,7 @@ export const habitService = {
     } catch (e) {
       console.warn("Direct habit create deferred:", e);
     }
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -69,7 +69,7 @@ export const habitService = {
     } catch (e) {
       console.warn("Direct habit update deferred:", e);
     }
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -106,7 +106,7 @@ export const habitService = {
     } catch (e) {
       console.warn("Direct habit delete deferred:", e);
     }
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return { id };
   },
 };

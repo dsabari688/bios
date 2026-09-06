@@ -1,5 +1,6 @@
 import type { Task, Habit, Goal, Expense, DiaryEntry, SystemNotification } from "../types";
-import type { SyncStatusState, SyncQueueItem } from "../sync/syncTypes";
+
+export type SyncStatusState = "pending" | "synced" | "failed";
 
 export interface LocalTask extends Task {
   _version?: number;

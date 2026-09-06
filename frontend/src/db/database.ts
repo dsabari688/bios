@@ -8,7 +8,6 @@ import type {
   LocalNotification,
   MetaKV,
 } from "./schema";
-import type { SyncQueueItem } from "../sync/syncTypes";
 import { configureMigrations } from "./migrations";
 
 export class LifeOSDatabase extends Dexie {
@@ -18,7 +17,7 @@ export class LifeOSDatabase extends Dexie {
   expenses!: Table<LocalExpense, string>;
   diary!: Table<LocalDiaryEntry, string>;
   notifications!: Table<LocalNotification, string>;
-  syncQueue!: Table<SyncQueueItem, string>;
+  syncQueue!: Table<any, string>;
   syncMetadata!: Table<MetaKV, string>;
 
   constructor() {

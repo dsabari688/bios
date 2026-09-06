@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalTask } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const taskRepository = {
   async getAll(): Promise<LocalTask[]> {
@@ -16,7 +15,6 @@ export const taskRepository = {
 
   async save(task: LocalTask, isRemote: boolean = false): Promise<LocalTask> {
     const now = new Date().toISOString();
-    const isNew = !(await db.tasks.get(task.id));
 
     const localTask: LocalTask = {
       ...task,
@@ -26,16 +24,6 @@ export const taskRepository = {
     };
 
     await db.tasks.put(localTask);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "task",
-        localTask.id,
-        isNew ? "create" : "update",
-        localTask
-      );
-    }
-
     return localTask;
   },
 
@@ -50,23 +38,9 @@ export const taskRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.tasks.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.tasks.delete(id);
-    } else {
-      // Soft-delete tombstone
-      const tombstoned: LocalTask = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-        _updatedAt: now,
-      };
-      await db.tasks.put(tombstoned);
-      await syncQueue.enqueue("task", id, "delete", { id, deletedAt: now });
-    }
+    await db.tasks.delete(id);
   },
 
   async markSynced(id: string, serverData?: Partial<LocalTask>): Promise<void> {

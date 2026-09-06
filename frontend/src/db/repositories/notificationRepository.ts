@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalNotification } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const notificationRepository = {
   async getAll(): Promise<LocalNotification[]> {
@@ -11,7 +10,6 @@ export const notificationRepository = {
 
   async save(notif: LocalNotification, isRemote: boolean = false): Promise<LocalNotification> {
     const now = new Date().toISOString();
-    const isNew = !(await db.notifications.get(notif.id));
 
     const localNotif: LocalNotification = {
       ...notif,
@@ -20,16 +18,6 @@ export const notificationRepository = {
     };
 
     await db.notifications.put(localNotif);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "notification",
-        localNotif.id,
-        isNew ? "create" : "update",
-        localNotif
-      );
-    }
-
     return localNotif;
   },
 
@@ -42,21 +30,9 @@ export const notificationRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.notifications.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.notifications.delete(id);
-    } else {
-      const tombstoned: LocalNotification = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-      };
-      await db.notifications.put(tombstoned);
-      await syncQueue.enqueue("notification", id, "delete", { id, deletedAt: now });
-    }
+    await db.notifications.delete(id);
   },
 
   async clear(): Promise<void> {

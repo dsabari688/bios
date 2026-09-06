@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalExpense } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const expenseRepository = {
   async getAll(): Promise<LocalExpense[]> {
@@ -16,7 +15,6 @@ export const expenseRepository = {
 
   async save(exp: LocalExpense, isRemote: boolean = false): Promise<LocalExpense> {
     const now = new Date().toISOString();
-    const isNew = !(await db.expenses.get(exp.id));
 
     const localExp: LocalExpense = {
       ...exp,
@@ -26,16 +24,6 @@ export const expenseRepository = {
     };
 
     await db.expenses.put(localExp);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "expense",
-        localExp.id,
-        isNew ? "create" : "update",
-        localExp
-      );
-    }
-
     return localExp;
   },
 
@@ -50,22 +38,9 @@ export const expenseRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.expenses.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.expenses.delete(id);
-    } else {
-      const tombstoned: LocalExpense = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-        _updatedAt: now,
-      };
-      await db.expenses.put(tombstoned);
-      await syncQueue.enqueue("expense", id, "delete", { id, deletedAt: now });
-    }
+    await db.expenses.delete(id);
   },
 
   async markSynced(id: string, serverData?: Partial<LocalExpense>): Promise<void> {

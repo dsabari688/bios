@@ -106,6 +106,14 @@ export const taskRepository = {
   },
 
   async delete(id: string) {
+    await pool.query(`CREATE TABLE IF NOT EXISTS "deleted_records" ("id" TEXT PRIMARY KEY, "entity" TEXT NOT NULL, "entityId" TEXT NOT NULL, "deletedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(
+      `INSERT INTO "deleted_records" ("id", "entity", "entityId", "deletedAt")
+       VALUES ($1, 'task', $2, NOW())
+       ON CONFLICT ("id") DO UPDATE SET "deletedAt" = NOW()`,
+      [`del-task-${id}`, id]
+    );
+
     const result = await pool.query(
       `
       DELETE FROM "task"

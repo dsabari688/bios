@@ -1,30 +1,26 @@
 import { useState, useEffect } from "react";
-import { syncManager } from "../sync/syncManager";
-import type { SyncStateSummary } from "../sync/syncTypes";
+import { useStore } from "../store/useStore";
 
 export function useSync() {
-  const [syncState, setSyncState] = useState<SyncStateSummary>({
-    isOnline: true,
-    isSyncing: false,
-    pendingCount: 0,
-    failedCount: 0,
-    lastSyncedAt: null,
-    lastError: null,
-  });
+  const isOffline = useStore((state) => state.isOffline);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  useEffect(() => {
-    const unsubscribe = syncManager.subscribe((state) => {
-      setSyncState(state);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const syncNow = () => {
-    syncManager.triggerSync();
+  const syncNow = async () => {
+    setIsSyncing(true);
+    try {
+      await useStore.getState().hydrateSystemData();
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return {
-    ...syncState,
+    isOnline: !isOffline,
+    isSyncing,
+    pendingCount: 0,
+    failedCount: 0,
+    lastSyncedAt: new Date().toISOString(),
+    lastError: null,
     syncNow,
   };
 }

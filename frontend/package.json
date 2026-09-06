@@ -7,7 +7,7 @@
     "dev": "vite --port=9000 --host=0.0.0.0",
     "build": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "electron:dev": "npm run build:electron && cross-env NODE_ENV=development electron .",
+    "electron:dev": "npm run build:electron && npx concurrently \"npm run dev\" \"npx wait-on http://localhost:9000 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "npm run build && npm run build:electron && electron-builder",
     "electron:package": "npm run build && npm run build:electron && npx electron-packager . BIOS --platform=win32 --arch=x64 --out=release-win --overwrite --prune=false",
     "electron:build:portable": "npm run build && npm run build:electron && electron-builder --win portable",

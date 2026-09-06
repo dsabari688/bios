@@ -156,8 +156,8 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
     const dateCompare = aDate.localeCompare(bDate);
     if (dateCompare !== 0) return dateCompare;
     
-    const aIsCritical = a?.category === "urgent-important" || a?.category === "important-urgent";
-    const bIsCritical = b?.category === "urgent-important" || b?.category === "important-urgent";
+    const aIsCritical = a?.category === "urgent-important" || (a?.category as string) === "important-urgent";
+    const bIsCritical = b?.category === "urgent-important" || (b?.category as string) === "important-urgent";
     if (aIsCritical !== bIsCritical) {
       return aIsCritical ? -1 : 1;
     }
@@ -196,9 +196,9 @@ export const MissionsView: React.FC<MissionsViewProps> = ({
   // FULL HELPER FUNCTION WITH ALL BUTTONS
   const renderTaskCard = (task: Task, isMission: boolean) => {
     const isCompleted = task.status === "completed";
-    const isCritical = task.category === "urgent-important" || task.category === "important-urgent";
+    const isCritical = task.category === "urgent-important" || (task.category as string) === "important-urgent";
     const isImportant = task.category === "important-not-urgent";
-    const isUrgentMinor = task.category === "urgent-not-important" || task.category === "not-important-urgent";
+    const isUrgentMinor = task.category === "urgent-not-important" || (task.category as string) === "not-important-urgent";
 
     let priorityLabel = "Low";
     let priorityBadgeColor = "bg-emerald-50 text-emerald-700 border-emerald-150";

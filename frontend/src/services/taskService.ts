@@ -1,5 +1,5 @@
 import { taskRepository } from "../db/repositories/taskRepository";
-import { syncManager } from "../sync/syncManager";
+import { useStore } from "../store/useStore";
 import type { Task } from "../types";
 
 export const taskService = {
@@ -39,7 +39,7 @@ export const taskService = {
     };
 
     const saved = await taskRepository.save(newTask);
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -53,7 +53,7 @@ export const taskService = {
     };
 
     const saved = await taskRepository.save(updated);
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 
@@ -63,7 +63,7 @@ export const taskService = {
 
   async remove(id: string): Promise<{ id: string }> {
     await taskRepository.remove(id);
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return { id };
   },
 };

@@ -4,7 +4,7 @@ import {
   taskCategoryToFront,
   type CreateTaskPayload,
 } from "../api/tasks.api";
-import { getApiBaseUrl } from "../api/client";
+import { apiRequest } from "../api/client";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -122,14 +122,10 @@ export function taskToBackendPayload(task: Partial<Task>): Record<string, unknow
 
 async function api<T = unknown>(path: string, method: string, body?: unknown): Promise<T | null> {
   try {
-    const baseUrl = getApiBaseUrl();
-    const res = await fetch(`${baseUrl}${path}`, {
+    return await apiRequest<T>(path, {
       method,
-      headers: { "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
   } catch {
     return null;
   }

@@ -19,7 +19,6 @@ import { SmartPlannerModal } from "../components/piggy/SmartPlannerModal";
 import { WeeklyReviewModal } from "../components/reviews/WeeklyReviewModal";
 import { OnboardingTour } from "../components/common/OnboardingTour";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
-import { SyncStatusBadge } from "../components/common/SyncStatusBadge";
 
 // Lazy views split
 const DashboardView = lazy(() => import("../components/dashboard/DashboardView").then(m => ({ default: m.DashboardView })));
@@ -152,6 +151,12 @@ export default function App() {
     }
     localStorage.setItem("theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (osData?.profile?.darkMode !== undefined) {
+      setTheme(osData.profile.darkMode ? "dark" : "light");
+    }
+  }, [osData?.profile?.darkMode]);
 
   // Splash Screen States
   const [splashStep, setSplashStep] = useState(0);
@@ -740,8 +745,6 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Real-Time Offline-First Sync Telemetry Badge */}
-              <SyncStatusBadge />
               {/* Theme quick toggle */}
               <button
                 type="button"
@@ -919,7 +922,7 @@ export default function App() {
               )}
 
               {activeView === "focus-timer" && (
-                <FocusModeView defaultTaskTitle={selectedTaskTitle || undefined} token={token} />
+                <FocusModeView />
               )}
 
               {activeView === "settings" && (

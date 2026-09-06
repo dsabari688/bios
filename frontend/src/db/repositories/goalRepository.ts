@@ -1,6 +1,5 @@
 import { db } from "../database";
 import type { LocalGoal } from "../schema";
-import { syncQueue } from "../../sync/syncQueue";
 
 export const goalRepository = {
   async getAll(): Promise<LocalGoal[]> {
@@ -16,7 +15,6 @@ export const goalRepository = {
 
   async save(goal: LocalGoal, isRemote: boolean = false): Promise<LocalGoal> {
     const now = new Date().toISOString();
-    const isNew = !(await db.goals.get(goal.id));
 
     const localGoal: LocalGoal = {
       ...goal,
@@ -26,16 +24,6 @@ export const goalRepository = {
     };
 
     await db.goals.put(localGoal);
-
-    if (!isRemote) {
-      await syncQueue.enqueue(
-        "goal",
-        localGoal.id,
-        isNew ? "create" : "update",
-        localGoal
-      );
-    }
-
     return localGoal;
   },
 
@@ -50,22 +38,9 @@ export const goalRepository = {
   },
 
   async remove(id: string, isRemote: boolean = false): Promise<void> {
-    const now = new Date().toISOString();
     const existing = await db.goals.get(id);
     if (!existing) return;
-
-    if (isRemote) {
-      await db.goals.delete(id);
-    } else {
-      const tombstoned: LocalGoal = {
-        ...existing,
-        _deletedAt: now,
-        _syncStatus: "pending",
-        _updatedAt: now,
-      };
-      await db.goals.put(tombstoned);
-      await syncQueue.enqueue("goal", id, "delete", { id, deletedAt: now });
-    }
+    await db.goals.delete(id);
   },
 
   async markSynced(id: string, serverData?: Partial<LocalGoal>): Promise<void> {

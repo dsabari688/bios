@@ -6,10 +6,10 @@ if (dns && typeof dns.setDefaultResultOrder === "function") {
 import { Pool } from "pg";
 
 const dbUrl = process.env.DATABASE_URL || "postgresql://postgres:120071@localhost:5432/lifeos";
-const isSupabase = dbUrl.includes("supabase.co");
+const isRemote = !dbUrl.includes("localhost") && !dbUrl.includes("127.0.0.1");
 
 export const pool = new Pool({
   connectionString: dbUrl,
-  ...(isSupabase ? { ssl: { rejectUnauthorized: false } } : {}),
+  ...(isRemote ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 

@@ -1,5 +1,5 @@
 import { notificationRepository } from "../db/repositories/notificationRepository";
-import { syncManager } from "../sync/syncManager";
+import { useStore } from "../store/useStore";
 import type { SystemNotification } from "../types";
 
 export const notificationService = {
@@ -16,7 +16,7 @@ export const notificationService = {
       ...existing,
       read: true,
     });
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
   },
 
   async addNotification(notif: Omit<SystemNotification, "id">): Promise<SystemNotification> {
@@ -26,7 +26,7 @@ export const notificationService = {
     };
 
     const saved = await notificationRepository.save(newNotif);
-    syncManager.triggerSync();
+    useStore.getState().hydrateSystemData();
     return saved;
   },
 };
