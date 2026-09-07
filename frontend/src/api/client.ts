@@ -124,7 +124,7 @@ export async function apiRequest<T>(
   for (const baseUrl of candidates) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(`${baseUrl}${path}`, {
         ...options,
