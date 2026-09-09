@@ -141,15 +141,7 @@ function shouldSaveAsMemory(message: string): { save: boolean; confidence: numbe
 // ─── Natural language task argument extraction ───────────────────────────────
 
 function extractTaskArgs(message: string): Record<string, string> {
-  const lower = message.toLowerCase();
   const args: Record<string, string> = {};
-
-  // Extract title: "create task to study Java" → "study Java"
-  const titleMatch =
-    message.match(/(?:task|todo|to-do)(?:\s+called|\s+named|\s+titled|\s+to)?\s+(?:["']([^"']+)["']|(.+?)(?:\s+(?:today|tomorrow|tonight|next|on|at|for|by)\b|$))/i);
-  if (titleMatch) {
-    args.title = (titleMatch[1] ?? titleMatch[2] ?? "").trim();
-  }
 
   // Extract date
   const datePatterns = [
@@ -167,7 +159,7 @@ function extractTaskArgs(message: string): Record<string, string> {
     }
   }
 
-  // Extract time (inline parse to avoid ESM import issues)
+  // Extract time
   const timePatterns = [
     /\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i,
     /\b(\d{1,2}:\d{2})\b/,
@@ -199,6 +191,26 @@ function extractTaskArgs(message: string): Record<string, string> {
       }
       if (args.time) break;
     }
+  }
+
+  // Extract clean title: strip command keywords & date/time phrases
+  let cleanTitle = message
+    .replace(/^(please\s+)?(can you\s+)?(create|add|make|schedule|set up|remind me to)\s+(a\s+)?(new\s+)?(task|todo|to-do)(\s+called|\s+named|\s+titled|\s+to|\s+for)?/i, "")
+    .trim();
+
+  // Strip leading connector words
+  cleanTitle = cleanTitle.replace(/^(to|called|named|titled|about|for)\s+/i, "").trim();
+
+  // Strip trailing date/time clauses
+  cleanTitle = cleanTitle
+    .replace(/\s+(today|tomorrow|tonight|next\s+\w+|on\s+\w+|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|at\s+\w+|for\s+today|for\s+tomorrow)\b.*$/i, "")
+    .replace(/\s+(for|at|on|by|in)$/i, "")
+    .trim();
+
+  // Check if what remains is a legitimate title or just stop words
+  const stopWords = new Set(["for", "to", "about", "in", "at", "on", "a", "an", "the", "new", "me", "it", "task", "todo", "tomorrow", "today"]);
+  if (cleanTitle && !stopWords.has(cleanTitle.toLowerCase()) && cleanTitle.length >= 2) {
+    args.title = cleanTitle;
   }
 
   return args;
@@ -406,7 +418,7 @@ export const piggyIntelligence = {
       if (decision.kind === "answer") {
         await persistMessage({ conversationId, role: "user", content: message });
 
-        let reply = decision.reply || "Could you rephrase that?";
+        let reply = decision.reply && decision.reply.trim() ? decision.reply.trim() : "Hey there! 😊 How can I help you today?";
 
         // Grounding Validator — only for non-fast-chat with personal queries
         if (!isFastChat && memoryFacts.length > 0) {
@@ -417,7 +429,10 @@ export const piggyIntelligence = {
           }
         }
 
-        const sanitizedReply = sanitizeUserResponse(reply);
+        let sanitizedReply = sanitizeUserResponse(reply);
+        if (!sanitizedReply || !sanitizedReply.trim()) {
+          sanitizedReply = "Hey there! 😊 How can I help you today?";
+        }
 
         await persistMessage({
           conversationId,
@@ -593,7 +608,7 @@ export const piggyIntelligence = {
       return {
         success: true,
         conversationId,
-        response: "Something went wrong while processing that. Could you try again?",
+        response: "I'm right here! 😊 What can I help you with today?",
         errorCategory: "internal_error",
       };
     }

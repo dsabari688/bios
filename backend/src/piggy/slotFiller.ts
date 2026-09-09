@@ -55,8 +55,12 @@ export function getDefaultValueForSlot(tool: string, slotKey: string): string | 
   if (typeof schemaDefault === "string") return schemaDefault;
 
   if (slotKey === "date") return formatLocalDate(new Date());
-  if (slotKey === "category") return "important-not-urgent";
-  if (slotKey === "title") return "New Task";
+  if (slotKey === "time") return "09:00";
+  if (slotKey === "category") return tool === "piggy_expense_create" ? "other" : "important-not-urgent";
+  if (slotKey === "title" || slotKey === "name") return "New Action Item";
+  if (slotKey === "amount") return "100";
+  if (slotKey === "mood") return "Good";
+  if (slotKey === "score") return "7";
   return null;
 }
 
@@ -73,18 +77,58 @@ const TASK_SLOTS: SlotDef[] = [
   },
   {
     key: "date",
-    question: "When do you want to do that?",
+    question: "When would you like to do that? (e.g. today or tomorrow)",
     transform: (raw) => parseDate(raw),
   },
   {
     key: "time",
-    question: "What time?",
+    question: "What time should I schedule it for? (e.g. 9 AM)",
     transform: (raw) => parseTime(raw),
+  },
+];
+
+const HABIT_SLOTS: SlotDef[] = [
+  {
+    key: "name",
+    question: "What habit would you like to build?",
+  },
+];
+
+const GOAL_SLOTS: SlotDef[] = [
+  {
+    key: "title",
+    question: "What goal or milestone would you like to achieve?",
+  },
+];
+
+const EXPENSE_SLOTS: SlotDef[] = [
+  {
+    key: "amount",
+    question: "How much did you spend? (e.g. ₹150)",
+    transform: (raw) => {
+      const m = raw.match(/\d+(?:\.\d+)?/);
+      return m ? m[0] : null;
+    },
+  },
+  {
+    key: "category",
+    question: "Which category? (e.g. Food, Transport, Shopping, Bills)",
+  },
+];
+
+const MOOD_SLOTS: SlotDef[] = [
+  {
+    key: "mood",
+    question: "How are you feeling right now?",
   },
 ];
 
 export const SLOT_DEFINITIONS: Record<string, SlotDef[]> = {
   piggy_task_create: TASK_SLOTS,
+  piggy_habit_create: HABIT_SLOTS,
+  piggy_goal_create: GOAL_SLOTS,
+  piggy_expense_create: EXPENSE_SLOTS,
+  piggy_mood_log: MOOD_SLOTS,
 };
 
 export function getRequiredSlotDefs(tool: string): SlotDef[] {

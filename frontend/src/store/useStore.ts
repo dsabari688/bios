@@ -1257,14 +1257,19 @@ export const useStore = create<StoreState>((set, get) => {
       try {
         const storedConversationId = localStorage.getItem("piggy_conversation_id");
         const baseUrl = getApiBaseUrl();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
         const res = await fetch(`${baseUrl}/piggy/chat`, {
           method: "POST",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message,
             conversationId: storedConversationId
           })
         });
+        clearTimeout(timeoutId);
 
         if (!res.ok) throw new Error(`Piggy backend responded ${res.status}`);
 
@@ -1275,9 +1280,9 @@ export const useStore = create<StoreState>((set, get) => {
 
         let reply: string;
         if (payload.success) {
-          reply = payload.response || "Done.";
+          reply = payload.response && payload.response.trim() ? payload.response.trim() : "Done! 😊";
         } else {
-          reply = payload.response || "I could not process that request.";
+          reply = payload.response && payload.response.trim() ? payload.response.trim() : "I'm right here! How can I help you today? 😊";
         }
 
         const assistantMessage: ChatMessage = {
@@ -1303,132 +1308,172 @@ export const useStore = create<StoreState>((set, get) => {
 
         return { success: payload.success };
       } catch (err) {
-        console.warn("[piggy] Direct Comms unavailable, using local fallback:", err);
+        console.warn("[piggy] Direct Comms unavailable, using smart local fallback:", err);
       }
 
-      // Local Fallback: Determine if user request maps to a local task/habit execution
-      setTimeout(() => {
-        const lowerMsg = message.toLowerCase().trim();
-        const todayStr = new Date().toISOString().split("T")[0];
-        const nowTimeStr = new Date().toTimeString().slice(0, 5);
+      // Smart Immediate Fallback: Handle conversational intent or local task/habit execution
+      const lowerMsg = message.toLowerCase().trim();
+      const todayStr = new Date().toISOString().split("T")[0];
+      const nowTimeStr = new Date().toTimeString().slice(0, 5);
 
-        let reply = "";
+      let reply = "";
 
-        const saveDataFn = (updated: any) => {
-          localStorage.setItem("lifeos_data", JSON.stringify(updated));
-          set({ osData: updated });
-        };
+      const saveDataFn = (updated: any) => {
+        localStorage.setItem("lifeos_data", JSON.stringify(updated));
+        set({ osData: updated });
+      };
 
-        // 1. Task Creation Detection
-        if (
-          (lowerMsg.startsWith("add task") || lowerMsg.startsWith("create task") || lowerMsg.startsWith("new task") || lowerMsg.startsWith("assign task") || lowerMsg.startsWith("task:"))
-        ) {
-          let taskTitle = message
-            .replace(/^(add task|create task|new task|assign task|task:)/i, "")
-            .trim();
-          
-          if (!taskTitle) taskTitle = "New Task";
-
-          const toolRes = executeMCPTool("tasks_create", {
-            title: taskTitle,
-            category: lowerMsg.includes("urgent") || lowerMsg.includes("critical") ? "urgent-important" : "important-not-urgent",
-            date: todayStr,
-            time: nowTimeStr
-          }, data, saveDataFn);
-
-          if (toolRes.success) {
-            reply = `Done — added task '${taskTitle}' for today.`;
-          }
+      // 0. Conversational Greetings & Friendly Banter (English + Tanglish)
+      if (/^(hi|hello|hey|vanakkam|hai|yo|sup|good morning|good afternoon|good evening|seri enna panra|enna panra)\b/i.test(lowerMsg)) {
+        const userName = data.profile?.name ? ` ${data.profile.name}` : "";
+        const pendingCount = data.tasks.filter(t => t.date === todayStr && t.status === "pending").length;
+        if (lowerMsg.includes("enna panra") || lowerMsg.includes("doing")) {
+          reply = `Just chilling and ready to help you out, Sabari! 😊 You have ${pendingCount} pending task${pendingCount === 1 ? '' : 's'} today. What are we planning or talking about?`;
+        } else {
+          reply = `Hey${userName}! 😊 How's your day going? You have ${pendingCount} pending task${pendingCount === 1 ? '' : 's'} scheduled for today. What would you like to work on or chat about?`;
         }
+      }
+      else if (lowerMsg.includes("what is your name") || lowerMsg.includes("your name") || lowerMsg.includes("who are you")) {
+        reply = "I'm Piggy, your friendly AI companion and LifeOS copilot! 😊";
+      }
+      else if (lowerMsg.includes("what is my name") || lowerMsg.includes("my name")) {
+        reply = `Your name is ${data.profile?.name || "Sabari"}. 😊`;
+      }
+      else if (lowerMsg.includes("movie") || lowerMsg.includes("cinema") || lowerMsg.includes("film")) {
+        reply = "Looking for top-tier cinema? 🎬 Here are some all-time greats:\n• **Interstellar / Inception** (Sci-fi Mindbenders)\n• **The Dark Knight** (Masterpiece Thriller)\n• **Vikram / Kaithi / Super Deluxe** (Riveting Cinema)\nWhat genre or mood are you in right now?";
+      }
+      else if (lowerMsg.includes("how are you") || lowerMsg.includes("how r u") || lowerMsg.includes("epdi irukka") || lowerMsg.includes("eppadi irukeenga")) {
+        reply = "I'm doing great and feeling energized! 😊 Ready to help you crush your tasks and goals today.";
+      }
+      else if (lowerMsg.includes("what can you do") || lowerMsg.includes("help me") || lowerMsg.includes("features")) {
+        reply = "Here's what I can do for you:\n• 📋 Create, schedule, and complete tasks ('create task Study AI for tomorrow at 10 AM')\n• ⚡ Log daily habits and view streaks ('log habit workout')\n• 💰 Track expenses & budgets ('spent 150 on lunch')\n• 🎯 Manage milestone goals ('new goal Learn Next.js')\n• 🎬 Chat about cinema, general knowledge, or get daily motivation!";
+      }
+      else if (lowerMsg.includes("motivate") || lowerMsg.includes("inspiration") || lowerMsg.includes("quote")) {
+        reply = "Stay locked in! 🔥 Small consistent efforts every single day compound into massive success. You've got this!";
+      }
+
+      // 1. Task Creation Detection
+      else if (
+        (lowerMsg.startsWith("add task") || lowerMsg.startsWith("create task") || lowerMsg.startsWith("new task") || lowerMsg.startsWith("assign task") || lowerMsg.startsWith("task:") || lowerMsg.includes("task for tomorrow"))
+      ) {
+        let taskTitle = message
+          .replace(/^(add task|create task|new task|assign task|task:)/i, "")
+          .replace(/\b(for tomorrow|today|tomorrow)\b/gi, "")
+          .trim();
         
-        // 2. Task Completion Detection
-        else if (lowerMsg.includes("complete task") || lowerMsg.includes("mark task done") || lowerMsg.includes("finished task")) {
-          const match = lowerMsg.replace(/(complete task|mark task done|finished task|done task)/i, "").trim();
-          const targetTask = data.tasks.find(t => t.title.toLowerCase().includes(match) || t.id === match);
-          if (targetTask) {
-            const toolRes = executeMCPTool("tasks_complete", { taskId: targetTask.id }, data, saveDataFn);
-            if (toolRes.success) {
-              reply = `Done — '${targetTask.title}' marked as completed.`;
-            }
-          }
+        const isTmrw = lowerMsg.includes("tomorrow");
+        const targetDate = isTmrw 
+          ? new Date(Date.now() + 86400000).toISOString().split("T")[0]
+          : todayStr;
+
+        if (!taskTitle || taskTitle.length < 2) taskTitle = "Action Task";
+
+        const toolRes = executeMCPTool("tasks_create", {
+          title: taskTitle,
+          category: lowerMsg.includes("urgent") || lowerMsg.includes("critical") ? "urgent-important" : "important-not-urgent",
+          date: targetDate,
+          time: "09:00"
+        }, data, saveDataFn);
+
+        if (toolRes.success) {
+          reply = `Done — added "${taskTitle}" for ${isTmrw ? 'tomorrow' : 'today'} at 9:00 AM.`;
         }
-
-        // 3. Habit Log / Toggle Detection
-        else if (lowerMsg.includes("log habit") || lowerMsg.includes("mark habit") || lowerMsg.includes("check habit") || lowerMsg.includes("done with habit")) {
-          const habitQuery = lowerMsg.replace(/(log habit|mark habit|check habit|done with habit)/i, "").trim();
-          const targetHabit = data.habits.find(h => h.name.toLowerCase().includes(habitQuery) || h.id === habitQuery);
-          if (targetHabit) {
-            const toolRes = executeMCPTool("habits_log", { habitId: targetHabit.id }, data, saveDataFn);
-            if (toolRes.success) {
-              reply = `Done — '${targetHabit.name}' logged for today! Streak is now ${targetHabit.streak} days.`;
-            }
-          }
-        }
-
-        // 4. Expense Logging Detection
-        else if (lowerMsg.includes("add expense") || lowerMsg.includes("log expense") || lowerMsg.startsWith("spent ") || lowerMsg.includes("paid ₹") || lowerMsg.includes("bought ")) {
-          const numMatch = lowerMsg.match(/(?:(?:rs\.?|₹|\$)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rs|inr|usd|bucks)?)/i);
-          const amount = numMatch ? parseFloat(numMatch[1] || numMatch[2]) : 150;
-          
-          let note = message.replace(/(add expense|log expense|spent|paid|bought|for|on|₹|\$|\d+)/gi, "").trim();
-          if (!note) note = "Expense";
-
-          let category: any = "food";
-          if (lowerMsg.includes("shop") || lowerMsg.includes("book") || lowerMsg.includes("cloth")) category = "shopping";
-          else if (lowerMsg.includes("cab") || lowerMsg.includes("uber") || lowerMsg.includes("fuel") || lowerMsg.includes("metro")) category = "transportation";
-          else if (lowerMsg.includes("course") || lowerMsg.includes("study") || lowerMsg.includes("exam")) category = "education";
-          else if (lowerMsg.includes("movie") || lowerMsg.includes("game")) category = "entertainment";
-
-          const toolRes = executeMCPTool("expenses_add", { amount, category, note }, data, saveDataFn);
+      }
+      
+      // 2. Task Completion Detection
+      else if (lowerMsg.includes("complete task") || lowerMsg.includes("mark task done") || lowerMsg.includes("finished task")) {
+        const match = lowerMsg.replace(/(complete task|mark task done|finished task|done task)/i, "").trim();
+        const targetTask = data.tasks.find(t => t.title.toLowerCase().includes(match) || t.id === match);
+        if (targetTask) {
+          const toolRes = executeMCPTool("tasks_complete", { taskId: targetTask.id }, data, saveDataFn);
           if (toolRes.success) {
-            reply = `Done — logged ₹${amount} under '${note}'.`;
+            reply = `Done — '${targetTask.title}' marked as completed. ✅`;
           }
         }
+      }
 
-        // 5. Goal Creation Detection
-        else if (lowerMsg.startsWith("new goal") || lowerMsg.startsWith("create goal") || lowerMsg.startsWith("add goal")) {
-          const goalTitle = message.replace(/(new goal|create goal|add goal):?/i, "").trim() || "New Goal";
-          const toolRes = executeMCPTool("goals_create", {
-            title: goalTitle,
-            targetDate: "2026-12-31",
-            progress: 0
-          }, data, saveDataFn);
+      // 3. Habit Log / Toggle Detection
+      else if (lowerMsg.includes("log habit") || lowerMsg.includes("mark habit") || lowerMsg.includes("check habit") || lowerMsg.includes("done with habit")) {
+        const habitQuery = lowerMsg.replace(/(log habit|mark habit|check habit|done with habit)/i, "").trim();
+        const targetHabit = data.habits.find(h => h.name.toLowerCase().includes(habitQuery) || h.id === habitQuery);
+        if (targetHabit) {
+          const toolRes = executeMCPTool("habits_log", { habitId: targetHabit.id }, data, saveDataFn);
           if (toolRes.success) {
-            reply = `Done — goal '${goalTitle}' added.`;
+            reply = `Done — '${targetHabit.name}' logged for today! Streak is now ${targetHabit.streak} days. 🔥`;
           }
         }
+      }
 
-        // Default fallback response
-        if (!reply) {
-          const pendingTasks = data.tasks.filter(t => t.status === "pending");
-          if (lowerMsg.includes("task") || lowerMsg.includes("todo") || lowerMsg.includes("plan")) {
-            if (pendingTasks.length === 0) {
-              reply = "You have no pending tasks right now.";
-            } else {
-              const taskListStr = pendingTasks.slice(0, 4).map(t => `• ${t.title}`).join("\n");
-              reply = `Here are your pending tasks:\n${taskListStr}`;
-            }
+      // 4. Expense Logging Detection
+      else if (lowerMsg.includes("add expense") || lowerMsg.includes("log expense") || lowerMsg.startsWith("spent ") || lowerMsg.includes("paid ₹") || lowerMsg.includes("bought ")) {
+        const numMatch = lowerMsg.match(/(?:(?:rs\.?|₹|\$)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rs|inr|usd|bucks)?)/i);
+        const amount = numMatch ? parseFloat(numMatch[1] || numMatch[2]) : 150;
+        
+        let note = message.replace(/(add expense|log expense|spent|paid|bought|for|on|₹|\$|\d+)/gi, "").trim();
+        if (!note) note = "Expense";
+
+        let category: any = "food";
+        if (lowerMsg.includes("shop") || lowerMsg.includes("book") || lowerMsg.includes("cloth")) category = "shopping";
+        else if (lowerMsg.includes("cab") || lowerMsg.includes("uber") || lowerMsg.includes("fuel") || lowerMsg.includes("metro")) category = "transportation";
+        else if (lowerMsg.includes("course") || lowerMsg.includes("study") || lowerMsg.includes("exam")) category = "education";
+        else if (lowerMsg.includes("movie") || lowerMsg.includes("game")) category = "entertainment";
+
+        const toolRes = executeMCPTool("expenses_add", { amount, category, note }, data, saveDataFn);
+        if (toolRes.success) {
+          reply = `Done — logged ₹${amount} under '${note}'.`;
+        }
+      }
+
+      // 5. Goal Creation Detection
+      else if (lowerMsg.startsWith("new goal") || lowerMsg.startsWith("create goal") || lowerMsg.startsWith("add goal")) {
+        const goalTitle = message.replace(/(new goal|create goal|add goal):?/i, "").trim() || "New Goal";
+        const toolRes = executeMCPTool("goals_create", {
+          title: goalTitle,
+          targetDate: "2026-12-31",
+          progress: 0
+        }, data, saveDataFn);
+        if (toolRes.success) {
+          reply = `Done — goal '${goalTitle}' added.`;
+        }
+      }
+
+      // Default fallback response
+      if (!reply) {
+        const pendingTasks = data.tasks.filter(t => t.status === "pending");
+        if (lowerMsg.includes("task") || lowerMsg.includes("todo") || lowerMsg.includes("plan")) {
+          if (pendingTasks.length === 0) {
+            reply = "You have no pending tasks right now. Would you like to create one?";
           } else {
-            reply = "I'm offline right now, but I can help you log tasks, habits, and expenses locally.";
+            const taskListStr = pendingTasks.slice(0, 4).map(t => `• ${t.title}`).join("\n");
+            reply = `Here are your pending tasks:\n${taskListStr}`;
           }
+        } else if (lowerMsg.includes("habit")) {
+          if (data.habits.length === 0) {
+            reply = "You haven't added any habits yet. You can add habits from the Habits view!";
+          } else {
+            const habitListStr = data.habits.map(h => `• ${h.name} (${h.streak || 0}d streak)`).join("\n");
+            reply = `Here are your active habits:\n${habitListStr}`;
+          }
+        } else {
+          reply = "I've noted that! 😊 How can I help with your schedule, tasks, or anything else today?";
         }
+      }
 
-        const assistantMessage: ChatMessage = {
-          id: `chat_reply_${Date.now()}`,
-          role: "assistant",
-          content: reply,
-          timestamp: new Date().toISOString()
-        };
+      const assistantMessage: ChatMessage = {
+        id: `chat_reply_${Date.now()}`,
+        role: "assistant",
+        content: reply,
+        timestamp: new Date().toISOString()
+      };
 
-        const latestData = get().osData || data;
-        const finalHistory = [...(latestData.chatHistory || []), assistantMessage];
-        const finalData: FullOSData = {
-          ...latestData,
-          chatHistory: finalHistory
-        };
-        localStorage.setItem("lifeos_data", JSON.stringify(finalData));
-        set({ osData: finalData, isUpdatingDb: false });
-      }, 750);
+      const latestData = get().osData || data;
+      const finalHistory = [...(latestData.chatHistory || []), assistantMessage];
+      const finalData: FullOSData = {
+        ...latestData,
+        chatHistory: finalHistory
+      };
+      localStorage.setItem("lifeos_data", JSON.stringify(finalData));
+      set({ osData: finalData, isUpdatingDb: false });
       
       return { success: true };
     },
