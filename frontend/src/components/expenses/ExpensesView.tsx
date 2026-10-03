@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Plus, Wallet, FileText, Upload, Sparkles, Check, CheckCircle2, ChevronRight, Calendar, Edit2, AlertTriangle, MessageSquare } from "lucide-react";
+import { Plus, Wallet, Upload, Check, AlertTriangle, MessageSquare, Receipt, Sparkles } from "lucide-react";
 import { Expense, CategoryBudget } from "../../types";
 import { getApiBaseUrl } from "../../api/client";
 
@@ -13,13 +13,13 @@ interface ExpensesViewProps {
 }
 
 const categoriesList = [
-  { value: "food", label: "Food & Dining", color: "bg-orange-50 text-orange-600 border-orange-100", barColor: "bg-orange-500" },
-  { value: "transportation", label: "Transportation", color: "bg-blue-50 text-blue-600 border-blue-100", barColor: "bg-blue-500" },
-  { value: "shopping", label: "Shopping & Goods", color: "bg-purple-50 text-purple-600 border-purple-100", barColor: "bg-purple-500" },
-  { value: "education", label: "Education & Growth", color: "bg-amber-50 text-amber-650 border-amber-100", barColor: "bg-amber-500" },
-  { value: "healthcare", label: "Healthcare", color: "bg-emerald-50 text-emerald-600 border-emerald-100", barColor: "bg-emerald-500" },
-  { value: "entertainment", label: "Entertainment", color: "bg-rose-50 text-rose-600 border-rose-100", barColor: "bg-rose-500" },
-  { value: "misc", label: "Miscellaneous", color: "bg-slate-50 text-slate-600 border-slate-100", barColor: "bg-slate-500" }
+  { value: "food", label: "Food & Dining", icon: "🍔", color: "bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400 border-orange-200 dark:border-orange-800/40", barColor: "bg-orange-500" },
+  { value: "transportation", label: "Transportation", icon: "🚗", color: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border-blue-200 dark:border-blue-800/40", barColor: "bg-blue-500" },
+  { value: "shopping", label: "Shopping & Goods", icon: "🛍️", color: "bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border-purple-200 dark:border-purple-800/40", barColor: "bg-purple-500" },
+  { value: "education", label: "Education & Growth", icon: "📚", color: "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200 dark:border-amber-800/40", barColor: "bg-amber-500" },
+  { value: "healthcare", label: "Healthcare", icon: "💊", color: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/40", barColor: "bg-emerald-500" },
+  { value: "entertainment", label: "Entertainment", icon: "🎬", color: "bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border-rose-200 dark:border-rose-800/40", barColor: "bg-rose-500" },
+  { value: "misc", label: "Miscellaneous", icon: "📦", color: "bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400 border-slate-200 dark:border-slate-700/50", barColor: "bg-slate-500" }
 ];
 
 export const ExpensesView: React.FC<ExpensesViewProps> = ({
@@ -31,17 +31,18 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onExplainExpense
 }) => {
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("misc");
+  const [category, setCategory] = useState("food");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [isImpulsive, setIsImpulsive] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Budget Adjuster State
   const [editingBudgetCategory, setEditingBudgetCategory] = useState("");
   const [editingBudgetLimit, setEditingBudgetLimit] = useState("");
-  
+
   // Explanation state
   const [explainingExpenseId, setExplainingExpenseId] = useState<string | null>(null);
   const [explanationText, setExplanationText] = useState("");
@@ -50,7 +51,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
   // Calculate totals per category for the CURRENT month
   const currentMonthStr = new Date().toISOString().substring(0, 7); // "YYYY-MM"
-  
+
   const getCategorySpend = (cat: string) => {
     return expenses
       .filter((e) => {
@@ -65,12 +66,21 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     return budget ? budget.limit : 0;
   };
 
+  const totalSpentThisMonth = expenses
+    .filter((e) => {
+      const d = e.date || (e as any).transactionDate || "";
+      return d.substring(0, 7) === currentMonthStr;
+    })
+    .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+  const totalBudgetLimit = budgets.reduce((sum, b) => sum + (b.limit || 0), 0);
+
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !token) return;
 
     setIsScanning(true);
-    setScanResult("Analyzing receipt pixels...");
+    setScanResult("Scanning receipt...");
 
     const formData = new FormData();
     formData.append("receipt", file);
@@ -91,35 +101,42 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         if (data.category) setCategory(data.category);
         if (data.note) setNote(data.note);
         if (data.date) setDate(data.date);
-        setScanResult("Scan complete! Prefilled form values.");
+        setScanResult("Receipt details filled into form!");
       } else {
-        setScanResult("Receipt scan failed. Fell back to simulation defaults.");
+        setScanResult("Could not parse receipt. Please enter details manually.");
       }
     } catch (err) {
       console.error(err);
-      setScanResult("Offline or scan error. Manual prefill fallback.");
+      setScanResult("Scan error. Please enter details manually.");
     } finally {
       setIsScanning(false);
       setTimeout(() => setScanResult(null), 4000);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || isNaN(parseFloat(amount))) return;
+    const parsedAmount = parseFloat(amount);
+    if (!amount || isNaN(parsedAmount) || parsedAmount <= 0) return;
 
-    await onAddExpense({
-      amount: parseFloat(amount),
-      category,
-      note,
-      date,
-      isImpulsive
-    });
+    setIsSubmitting(true);
+    try {
+      await onAddExpense({
+        amount: parsedAmount,
+        category,
+        note: note.trim() || categoriesList.find((c) => c.value === category)?.label || "Expense",
+        date,
+        isImpulsive
+      });
 
-    setAmount("");
-    setNote("");
-    setIsImpulsive(false);
-    setDate(new Date().toISOString().split("T")[0]);
+      setAmount("");
+      setNote("");
+      setIsImpulsive(false);
+      setDate(new Date().toISOString().split("T")[0]);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleBudgetSubmit = async (e: React.FormEvent) => {
@@ -147,29 +164,45 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     groupedExpenses[month].push(e);
   });
 
-  // Sort months descending
   const sortedMonths = Object.keys(groupedExpenses).sort((a, b) => String(b || "").localeCompare(String(a || "")));
 
   return (
-    <div className="space-y-6 pb-24">
-      {/* Title Header */}
-      <div>
-        <h2 className="font-display font-black text-2xl text-slate-900 tracking-tight">Financial Cockpit</h2>
-        <p className="text-xs text-slate-500 font-sans mt-0.5">Audit expenses, maintain budget coherence, and reflect on impulsive decisions.</p>
+    <div className="space-y-6 pb-24 max-w-6xl mx-auto">
+      {/* Header & Quick Stats */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="font-display font-bold text-2xl text-slate-900 dark:text-slate-100 tracking-tight">Expenses & Budget</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">Track daily spending and manage monthly category allowances.</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl px-4 py-2 shadow-xs">
+            <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Spent This Month</span>
+            <span className="text-base font-extrabold font-mono text-slate-900 dark:text-slate-100">₹{totalSpentThisMonth.toFixed(2)}</span>
+          </div>
+          {totalBudgetLimit > 0 && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl px-4 py-2 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Total Budget</span>
+              <span className="text-base font-extrabold font-mono text-slate-600 dark:text-slate-300">₹{totalBudgetLimit.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Form & History */}
+        {/* Left Column: Log Form & History */}
         <div className="lg:col-span-2 space-y-6">
-          {/* New Expense Form Card */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
-              <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
-                <Wallet className="w-4.5 h-4.5 text-amber-500" />
-                <span>Log New Expense</span>
+          {/* Simple Log Expense Form Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-xs p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold text-sm">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-500 flex items-center justify-center">
+                  <Wallet className="w-4.5 h-4.5" />
+                </div>
+                <span>Log Expense</span>
               </div>
-              
-              {/* Receipt Upload trigger */}
+
+              {/* Minimal Receipt Scan Button */}
               <div>
                 <input 
                   type="file" 
@@ -182,93 +215,102 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isScanning}
-                  className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100/50 text-amber-850 text-[10px] font-mono font-bold rounded-lg border border-amber-200/50 cursor-pointer flex items-center gap-1.5 transition-all disabled:opacity-55"
+                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-lg border border-slate-200/80 dark:border-slate-700 cursor-pointer flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  title="Scan a receipt image using AI"
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  {isScanning ? "Scanning Receipt..." : "Upload Receipt Scan"}
+                  <Receipt className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{isScanning ? "Scanning..." : "Scan Receipt"}</span>
                 </button>
               </div>
             </div>
 
             {scanResult && (
-              <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl text-[11px] font-mono text-amber-750 animate-pulse">
-                {scanResult}
+              <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/50 rounded-xl text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2 animate-in fade-in">
+                <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>{scanResult}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Amount (₹)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-semibold">₹</span>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Amount Field */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Amount</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-bold text-sm">₹</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      required
+                      placeholder="0.00"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="w-full pl-8 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Category Field */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer transition-all"
+                  >
+                    {categoriesList.map((cat) => (
+                      <option key={cat.value} value={cat.value} className="dark:bg-slate-900 dark:text-slate-100">
+                        {cat.icon} {cat.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Note / Description */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Description</label>
                   <input
                     type="text"
+                    placeholder="e.g. Lunch, Groceries, Metro ride"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                  />
+                </div>
+
+                {/* Date */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Date</label>
+                  <input
+                    type="date"
                     required
-                    placeholder="0.00"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full pl-7 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:outline-none focus:border-amber-500 font-mono"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  {categoriesList.map((cat) => (
-                    <option key={cat.value} value={cat.value}>{cat.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Date</label>
-                <input
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:outline-none focus:border-amber-500 font-mono"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Note / Merchant</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Stark Labs Equipment"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {/* Impulsive checkbox */}
-              <div className="md:col-span-2 flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="isImpulsive"
-                  checked={isImpulsive}
-                  onChange={(e) => setIsImpulsive(e.target.checked)}
-                  className="rounded text-amber-500 focus:ring-amber-500 h-4 w-4 border-slate-300 cursor-pointer"
-                />
-                <label htmlFor="isImpulsive" className="text-xs font-semibold text-slate-650 cursor-pointer select-none flex items-center gap-1">
-                  Mark as Impulsive Purchase
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500 inline" />
+              {/* Footer Row: Impulsive toggle + Add Button */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isImpulsive}
+                    onChange={(e) => setIsImpulsive(e.target.checked)}
+                    className="rounded text-amber-500 focus:ring-amber-500 h-4 w-4 border-slate-300 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                  />
+                  <span>Unplanned / Impulsive buy</span>
                 </label>
-              </div>
 
-              <div className="md:col-span-2 flex justify-end pt-2">
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-display font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer max-w-fit active:scale-[0.98]"
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
                 >
-                  <Plus className="w-4 h-4 text-amber-500 stroke-3" />
-                  Commit Transaction
+                  <Plus className="w-4 h-4" />
+                  <span>{isSubmitting ? "Adding..." : "Add Expense"}</span>
                 </button>
               </div>
             </form>
@@ -276,15 +318,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
           {/* Past Expenses List */}
           <div className="space-y-4">
-            <h3 className="font-display font-black text-slate-800 text-sm">Transaction Ledger History</h3>
+            <h3 className="font-display font-bold text-slate-800 dark:text-slate-200 text-sm">Recent Expenses</h3>
             
             {sortedMonths.length === 0 ? (
-              <div className="p-12 text-center bg-white rounded-2xl border border-slate-100 text-slate-400 text-xs">
-                No telemetry expense logs registered.
+              <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-xs">
+                No expenses logged yet.
               </div>
             ) : (
               sortedMonths.map((month) => {
-                // Parse month title (e.g. "2026-06" -> "June 2026")
                 const [y, m] = month.split("-");
                 const dateObj = new Date(parseInt(y), parseInt(m) - 1, 1);
                 const monthTitle = dateObj.toLocaleString("default", { month: "long", year: "numeric" });
@@ -296,88 +337,93 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 });
 
                 return (
-                  <div key={month} className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
-                    <h4 className="font-display font-bold text-slate-900 text-sm border-b border-slate-50 pb-2">{monthTitle}</h4>
+                  <div key={month} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-xs p-5 sm:p-6 space-y-4">
+                    <h4 className="font-display font-bold text-slate-900 dark:text-slate-100 text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
+                      {monthTitle}
+                    </h4>
                     
-                    <div className="divide-y divide-slate-100 space-y-3">
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 space-y-2.5">
                       {monthExpenses.map((exp) => {
-                        const catDetail = categoriesList.find((c) => c.value === exp.category) || { label: "Misc", color: "bg-slate-50 text-slate-500 border-slate-150" };
+                        const catDetail = categoriesList.find((c) => c.value === exp.category) || { label: "Misc", icon: "📦", color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200" };
                         const limit = getCategoryBudgetLimit(exp.category);
                         const totalSpent = getCategorySpend(exp.category);
                         const isOverBudget = limit > 0 && totalSpent > limit;
 
                         return (
-                          <div key={exp.id} className="pt-3.5 flex flex-col gap-2 transition-all">
+                          <div key={exp.id} className="pt-2.5 flex flex-col gap-2">
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center text-sm shrink-0">
+                                  {catDetail.icon}
+                                </div>
                                 <div className="min-w-0">
-                                  <span className="font-display font-bold text-xs text-slate-800 block">
-                                    {exp.note || "Uncategorized purchase"}
+                                  <span className="font-semibold text-xs text-slate-800 dark:text-slate-100 block truncate">
+                                    {exp.note || "Expense"}
                                   </span>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <span className="font-mono text-[9px] text-slate-400">{exp.date}</span>
-                                    <span className={`text-[8px] font-mono font-bold px-2 py-0.2 rounded-full border ${catDetail.color}`}>
+                                  <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                    <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">{exp.date}</span>
+                                    <span className={`text-[9px] font-medium px-2 py-0.5 rounded-full border ${catDetail.color}`}>
                                       {catDetail.label}
                                     </span>
                                     {exp.isImpulsive && (
-                                      <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.2 rounded-full text-[8px] font-mono font-bold uppercase tracking-wider">
+                                      <span className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full text-[9px] font-medium">
                                         Impulsive
                                       </span>
                                     )}
                                     {isOverBudget && (
-                                      <span className="bg-rose-50 border border-rose-100 text-rose-600 px-2 py-0.2 rounded-full text-[8px] font-mono font-bold uppercase tracking-wider">
+                                      <span className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/40 text-rose-600 dark:text-rose-400 px-2 py-0.5 rounded-full text-[9px] font-medium">
                                         Over Budget
                                       </span>
                                     )}
                                   </div>
                                 </div>
                               </div>
-                              <span className="font-mono font-extrabold text-sm text-slate-900 shrink-0">
+                              <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100 shrink-0">
                                 -₹{exp.amount.toFixed(2)}
                               </span>
                             </div>
 
-                            {/* Show Explanation Reflection UI if required */}
+                            {/* Reflection UI if required */}
                             {(exp.isImpulsive || isOverBudget) && (
-                              <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-100/60 mt-1">
+                              <div className="bg-slate-50 dark:bg-slate-950/60 rounded-xl p-3 border border-slate-100 dark:border-slate-800/60 mt-0.5">
                                 {exp.explanation ? (
-                                  <div className="flex gap-2 items-start text-xs text-slate-650">
-                                    <MessageSquare className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                                  <div className="flex gap-2 items-start text-xs text-slate-600 dark:text-slate-400">
+                                    <MessageSquare className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                                     <p className="italic">"{exp.explanation}"</p>
                                   </div>
                                 ) : explainingExpenseId === exp.id ? (
                                   <div className="space-y-2">
-                                    <label className="block text-[9px] font-mono font-bold text-slate-400 uppercase">Input butler reflection / reason:</label>
+                                    <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400">Reflection / reason for purchase:</label>
                                     <div className="flex gap-2">
                                       <input
                                         type="text"
-                                        placeholder="e.g. Needed it for an upcoming study project."
+                                        placeholder="e.g. Needed it for project work"
                                         value={explanationText}
                                         onChange={(e) => setExplanationText(e.target.value)}
-                                        className="flex-1 px-3 py-1 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-amber-500 text-xs"
+                                        className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-amber-500 text-xs text-slate-800 dark:text-slate-200"
                                       />
                                       <button
                                         onClick={() => handleExplainSubmit(exp.id)}
-                                        className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white font-mono text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                        className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                                       >
-                                        Log
+                                        Save
                                       </button>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex justify-between items-center text-xs">
-                                    <span className="text-slate-400 font-medium italic flex items-center gap-1.5">
-                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                                      Auditing explanation required
+                                    <span className="text-slate-500 dark:text-slate-400 italic flex items-center gap-1.5 text-[11px]">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                      Add reflection note
                                     </span>
                                     <button
                                       onClick={() => {
                                         setExplainingExpenseId(exp.id);
                                         setExplanationText("");
                                       }}
-                                      className="px-2 py-0.8 bg-amber-500 hover:bg-amber-600 text-slate-950 font-mono text-[9px] font-black uppercase tracking-wider rounded-md transition-colors cursor-pointer"
+                                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-[10px] uppercase tracking-wider rounded-md transition-colors cursor-pointer"
                                     >
-                                      Explain
+                                      Add Note
                                     </button>
                                   </div>
                                 )}
@@ -394,13 +440,13 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Budgets Progress Cockpit */}
+        {/* Right Column: Budgets Progress & Adjustment */}
         <div className="space-y-6">
-          {/* Progress Bars */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-5">
-            <h3 className="font-display font-bold text-slate-800 text-sm">Budget Allowances</h3>
+          {/* Category Budgets Progress */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-xs p-5 sm:p-6 space-y-4">
+            <h3 className="font-display font-bold text-slate-800 dark:text-slate-100 text-sm">Monthly Budgets</h3>
             
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               {categoriesList.map((cat) => {
                 const totalSpent = getCategorySpend(cat.value);
                 const limit = getCategoryBudgetLimit(cat.value);
@@ -410,14 +456,17 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
                 return (
                   <div key={cat.value} className="space-y-1">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wide">
-                      <span>{cat.label}</span>
-                      <span className="font-mono">
-                        ₹{totalSpent.toFixed(2)} / <span className="text-slate-405">₹{limit.toFixed(2)}</span>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{cat.icon}</span>
+                        <span>{cat.label}</span>
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                        ₹{totalSpent.toFixed(2)} {limit > 0 ? `/ ₹${limit.toFixed(2)}` : ""}
                       </span>
                     </div>
                     
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden relative">
+                    <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden relative">
                       <div 
                         className={`h-full ${isOver ? "bg-rose-500" : cat.barColor} rounded-full transition-all duration-500`}
                         style={{ width: `${limit > 0 ? ratioPercent : 0}%` }}
@@ -429,44 +478,48 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             </div>
           </div>
 
-          {/* Adjust budget limits form */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
-            <h3 className="font-display font-bold text-slate-800 text-sm">Update Allowances Limits</h3>
+          {/* Set / Update Budget Limits */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-xs p-5 sm:p-6 space-y-4">
+            <h3 className="font-display font-bold text-slate-800 dark:text-slate-100 text-sm">Set Category Budget</h3>
             
             <form onSubmit={handleBudgetSubmit} className="space-y-3">
               <div className="space-y-1">
-                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">Category</label>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Category</label>
                 <select
                   value={editingBudgetCategory}
                   onChange={(e) => setEditingBudgetCategory(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-705 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
                   required
                 >
                   <option value="">-- Choose Category --</option>
                   {categoriesList.map((cat) => (
-                    <option key={cat.value} value={cat.value}>{cat.label}</option>
+                    <option key={cat.value} value={cat.value} className="dark:bg-slate-900 dark:text-slate-100">
+                      {cat.icon} {cat.label}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">New Monthly Limit (₹)</label>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Monthly Limit (₹)</label>
                 <input
-                  type="text"
+                  type="number"
+                  step="any"
+                  min="0"
                   required
-                  placeholder="250.00"
+                  placeholder="e.g. 5000"
                   value={editingBudgetLimit}
                   onChange={(e) => setEditingBudgetLimit(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-xs focus:outline-none focus:border-amber-500 font-mono"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-mono"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2 bg-slate-950 hover:bg-slate-905 border border-transparent text-white font-display font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-[0.98]"
+                className="w-full py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
               >
-                <Check className="w-3.5 h-3.5 text-amber-500 stroke-3" />
-                Commit Limit updates
+                <Check className="w-3.5 h-3.5 text-amber-500" />
+                <span>Save Budget</span>
               </button>
             </form>
           </div>
@@ -475,4 +528,3 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     </div>
   );
 };
-

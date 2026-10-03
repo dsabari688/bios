@@ -10,6 +10,9 @@ coverage/
 # Electron build artifacts
 dist-electron-build/
 release-win/
+dist-electron/
+frontend/dist-electron/
+bios-main/
 
 # Electron generated builds
 frontend/release-electron/

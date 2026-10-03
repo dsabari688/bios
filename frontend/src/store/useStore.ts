@@ -368,7 +368,10 @@ export const useStore = create<StoreState>((set, get) => {
     },
     setIsLoggedIn: (isLoggedIn) => set({ isLoggedIn }),
     setCurrentUser: (currentUser) => set({ currentUser }),
-    setActiveView: (activeView) => set({ activeView }),
+    setActiveView: (activeView) => {
+      const target = (activeView as string) === "missions" ? "dashboard" : activeView;
+      set({ activeView: target });
+    },
     setIsSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
     setNotificationsOpen: (notificationsOpen) => set({ notificationsOpen }),
     setLoginUsername: (loginUsername) => set({ loginUsername }),
@@ -568,7 +571,7 @@ export const useStore = create<StoreState>((set, get) => {
                 description: lg.description,
                 targetDate: lg.targetDate,
                 progress: lg.progress,
-                status: lg.status
+                status: lg.status as any
               }).then(async (created) => {
                 if (created && created.id) {
                   await goalRepository.remove(lg.id, true).catch(() => {});
@@ -792,6 +795,7 @@ export const useStore = create<StoreState>((set, get) => {
             date: taskData.date ? (taskData.date.includes("T") ? taskData.date.split("T")[0] : taskData.date) : getLocalDateString(new Date()),
             time: taskData.time || "09:00",
             endTime: taskData.endTime,
+            durationMinutes: taskData.durationMinutes,
             description: taskData.description,
             recurType: taskData.recurType || "none",
             status: taskData.status || "pending",
@@ -960,17 +964,19 @@ export const useStore = create<StoreState>((set, get) => {
     // Habits Actions
     toggleHabit: async (habitId, targetDateStr) => {
       try {
-        const effectiveDate = targetDateStr || get().selectedDate || new Date().toISOString().split("T")[0];
+        const effectiveDate = targetDateStr || get().selectedDate || getLocalDateString(new Date());
         const updatedHabit = await habitService.toggle(habitId, effectiveDate);
         const data = getOSDataFromStoreOrLocalStorage(set, get);
 
         if (updatedHabit) {
-          const index = data.habits.findIndex((habit) => habit.id === habitId);
+          const habits = [...data.habits];
+          const index = habits.findIndex((habit) => habit.id === habitId);
           if (index !== -1) {
-            data.habits[index] = updatedHabit;
+            habits[index] = updatedHabit;
           } else {
-            data.habits.push(updatedHabit);
+            habits.push(updatedHabit);
           }
+          data.habits = habits;
         }
 
         localStorage.setItem("lifeos_data", JSON.stringify(data));
@@ -984,15 +990,19 @@ export const useStore = create<StoreState>((set, get) => {
 
     updateHabitProgress: async (habitId, delta, targetDateStr) => {
       try {
-        const effectiveDate = targetDateStr || get().selectedDate || new Date().toISOString().split("T")[0];
+        const effectiveDate = targetDateStr || get().selectedDate || getLocalDateString(new Date());
         const updatedHabit = await habitService.updateProgress(habitId, effectiveDate, delta);
         const data = getOSDataFromStoreOrLocalStorage(set, get);
 
         if (updatedHabit) {
-          const index = data.habits.findIndex((habit) => habit.id === habitId);
+          const habits = [...data.habits];
+          const index = habits.findIndex((habit) => habit.id === habitId);
           if (index !== -1) {
-            data.habits[index] = updatedHabit;
+            habits[index] = updatedHabit;
+          } else {
+            habits.push(updatedHabit);
           }
+          data.habits = habits;
         }
 
         localStorage.setItem("lifeos_data", JSON.stringify(data));

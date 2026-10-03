@@ -30,6 +30,9 @@ export interface UpdateHabitInput {
   unit?: string;
   stepIncrement?: number;
   notes?: string;
+  logs?: string[];
+  streak?: number;
+  dailyProgress?: Record<string, number>;
 }
 
 export interface UpdateHabitProgressInput {

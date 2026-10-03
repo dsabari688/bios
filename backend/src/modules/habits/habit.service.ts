@@ -117,6 +117,17 @@ function normalizeDailyProgress(
   );
 }
 
+function normalizeLogs(logs: unknown): string[] {
+  if (Array.isArray(logs)) return [...logs];
+  if (typeof logs === "string") {
+    try {
+      const parsed = JSON.parse(logs);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return [];
+}
+
 export class DuplicateHabitError extends Error {
   readonly code = "DUPLICATE_HABIT";
   constructor(name: string) {
@@ -240,9 +251,7 @@ export const habitService = {
       throw new Error("Habit not found");
     }
 
-    const logs = Array.isArray(habit.logs)
-      ? [...habit.logs]
-      : [];
+    const logs = normalizeLogs(habit.logs);
     const dailyProgress = normalizeDailyProgress(
       habit.dailyProgress,
     );
@@ -310,9 +319,7 @@ export const habitService = {
       throw new Error("Habit not found");
     }
 
-    const logs = Array.isArray(habit.logs)
-      ? [...habit.logs]
-      : [];
+    const logs = normalizeLogs(habit.logs);
     const dailyProgress = normalizeDailyProgress(
       habit.dailyProgress,
     );

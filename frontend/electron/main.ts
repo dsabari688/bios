@@ -16,13 +16,15 @@ if (!gotTheLock) {
   });
 
   function createWindow() {
+    const iconPath = path.join(app.getAppPath(), "public/icons/icon-512.png");
+
     mainWindow = new BrowserWindow({
       width: 1280,
       height: 800,
       minWidth: 900,
       minHeight: 600,
       title: "BIOS",
-      icon: path.join(__dirname, "../../public/favicon.svg"),
+      icon: iconPath,
       webPreferences: {
         preload: path.join(__dirname, "preload.js"),
         contextIsolation: true,
@@ -31,6 +33,7 @@ if (!gotTheLock) {
       },
       autoHideMenuBar: true,
       backgroundColor: "#020617",
+      show: true,
     });
 
     const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
@@ -41,11 +44,25 @@ if (!gotTheLock) {
         console.error("Failed to load dev URL:", devUrl, err);
       });
     } else {
-      const indexPath = path.join(__dirname, "../../dist/index.html");
+      const indexPath = path.join(app.getAppPath(), "dist/index.html");
       mainWindow.loadFile(indexPath).catch((err) => {
         console.error("Failed to load index.html from:", indexPath, err);
+        // Fallback relative to __dirname
+        const fallbackPath = path.join(__dirname, "../../dist/index.html");
+        mainWindow?.loadFile(fallbackPath).catch((fallbackErr) => {
+          console.error("Failed fallback load:", fallbackErr);
+        });
       });
     }
+
+    mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+      console.error("[electron] Failed to load:", errorCode, errorDescription);
+    });
+
+    mainWindow.once("ready-to-show", () => {
+      mainWindow?.show();
+      mainWindow?.focus();
+    });
 
     mainWindow.on("closed", () => {
       mainWindow = null;

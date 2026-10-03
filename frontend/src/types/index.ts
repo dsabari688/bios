@@ -41,6 +41,7 @@ export interface Task {
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   endTime?: string; // HH:MM
+  durationMinutes?: number; // Estimated duration in minutes
   description?: string; // Additional details
   recurType: 'none' | 'daily' | 'weekly';
   status: 'pending' | 'completed';

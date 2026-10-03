@@ -33,7 +33,7 @@ export const goalService = {
         description: newGoal.description,
         targetDate: newGoal.targetDate,
         progress: newGoal.progress,
-        status: newGoal.status,
+        status: newGoal.status as any,
       });
       if (remote && remote.id && remote.id !== newGoal.id) {
         await goalRepository.remove(newGoal.id);
@@ -63,7 +63,7 @@ export const goalService = {
     try {
       await updateGoal(id, {
         progress,
-        status: updated.status,
+        status: updated.status as any,
       });
     } catch (e) {
       console.warn("Direct goal update deferred:", e);

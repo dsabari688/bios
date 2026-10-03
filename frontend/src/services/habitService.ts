@@ -74,29 +74,97 @@ export const habitService = {
   },
 
   async toggle(id: string, date: string): Promise<Habit | undefined> {
+    // 1. Try remote API toggle first
+    try {
+      const remote = await habitsApi.toggle(id, date);
+      if (remote && remote.id) {
+        await habitRepository.save(remote as any, true);
+        return remote;
+      }
+    } catch (e) {
+      console.warn("Direct habit toggle deferred/offline:", e);
+    }
+
+    // 2. Local fallback if offline or remote fails
     const habit = await habitRepository.getById(id);
     if (!habit) return undefined;
 
     const logsArr = safeLogs(habit?.logs);
     const hasLog = logsArr.includes(date);
-    const newLogs = hasLog ? logsArr.filter((d) => d !== date) : [...logsArr, date];
-    const newStreak = newLogs.length;
+    const target = habit.targetValue !== null && habit.targetValue !== undefined ? Number(habit.targetValue) : 1;
+    const newDailyProgress: Record<string, number> = { ...(habit.dailyProgress || {}) };
+    let newLogs: string[];
 
-    return this.update(id, {
+    if (hasLog) {
+      newLogs = logsArr.filter((d) => d !== date);
+      delete newDailyProgress[date];
+    } else {
+      newLogs = [...logsArr, date];
+      newDailyProgress[date] = target > 0 ? target : 1;
+    }
+
+    const updated: Habit = {
+      ...habit,
       logs: newLogs,
-      streak: newStreak,
-    });
+      streak: newLogs.length,
+      dailyProgress: newDailyProgress,
+    };
+
+    const saved = await habitRepository.save(updated as any);
+    return saved;
   },
 
   async updateProgress(id: string, date: string, delta: number): Promise<Habit | undefined> {
+    // 1. Try remote API progress first
+    try {
+      const remote = await habitsApi.updateProgress(id, date, delta);
+      if (remote && remote.id) {
+        await habitRepository.save(remote as any, true);
+        return remote;
+      }
+    } catch (e) {
+      console.warn("Direct habit progress update deferred/offline:", e);
+    }
+
+    // 2. Local fallback if offline or remote fails
     const habit = await habitRepository.getById(id);
     if (!habit) return undefined;
 
     const currentProg = habit.dailyProgress?.[date] || 0;
     const nextProg = Math.max(0, currentProg + delta);
-    const newDailyProgress = { ...habit.dailyProgress, [date]: nextProg };
+    const newDailyProgress: Record<string, number> = { ...(habit.dailyProgress || {}) };
 
-    return this.update(id, { dailyProgress: newDailyProgress });
+    if (nextProg > 0) {
+      newDailyProgress[date] = nextProg;
+    } else {
+      delete newDailyProgress[date];
+    }
+
+    const logsArr = safeLogs(habit?.logs);
+    const target = habit.targetValue !== null && habit.targetValue !== undefined ? Number(habit.targetValue) : null;
+    let newLogs = [...logsArr];
+
+    if (target !== null && target > 0) {
+      if (nextProg >= target) {
+        if (!newLogs.includes(date)) newLogs.push(date);
+      } else {
+        newLogs = newLogs.filter((d) => d !== date);
+      }
+    } else if (nextProg > 0) {
+      if (!newLogs.includes(date)) newLogs.push(date);
+    } else {
+      newLogs = newLogs.filter((d) => d !== date);
+    }
+
+    const updated: Habit = {
+      ...habit,
+      logs: newLogs,
+      streak: newLogs.length,
+      dailyProgress: newDailyProgress,
+    };
+
+    const saved = await habitRepository.save(updated as any);
+    return saved;
   },
 
   async delete(id: string): Promise<{ id: string }> {

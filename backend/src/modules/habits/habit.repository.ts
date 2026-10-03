@@ -114,8 +114,13 @@ export const habitRepository = {
 
     for (const [key, value] of Object.entries(input)) {
       if (value !== undefined) {
-        fields.push(`"${key}" = $${values.length + 1}`);
-        values.push(value);
+        if (key === "logs" || key === "dailyProgress") {
+          fields.push(`"${key}" = $${values.length + 1}::jsonb`);
+          values.push(JSON.stringify(value));
+        } else {
+          fields.push(`"${key}" = $${values.length + 1}`);
+          values.push(value);
+        }
       }
     }
 

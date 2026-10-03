@@ -183,6 +183,23 @@ export function validateUpdateHabit(
     result.notes = String(input.notes);
   }
 
+  if (input.logs !== undefined) {
+    if (Array.isArray(input.logs)) {
+      result.logs = input.logs.map(String);
+    }
+  }
+
+  if (input.streak !== undefined) {
+    const num = Number(input.streak);
+    if (Number.isFinite(num) && num >= 0) {
+      result.streak = num;
+    }
+  }
+
+  if (input.dailyProgress !== undefined && typeof input.dailyProgress === "object" && input.dailyProgress !== null) {
+    result.dailyProgress = input.dailyProgress as Record<string, number>;
+  }
+
   return result;
 }
 

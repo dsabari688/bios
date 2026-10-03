@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useCallback } from "react";
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Clock, Activity, Sparkles, Brain } from "lucide-react";
+import { TrendingUp, TrendingDown, CheckCircle2, Clock, Flame, BarChart2 } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { analyticsApi, type DiagnosticMetrics } from "../../api/analytics.api";
-import { Task, Habit } from "../../types";
+import { Task, Habit, safeLogs } from "../../types";
+import { getLocalDateString } from "../../lib/timeUtils";
 
 interface AnalyticsViewProps {
   tasks: Task[];
@@ -25,6 +25,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
   const [error, setError] = useState<string | null>(null);
 
   const selectedDays = PERIOD_OPTIONS[periodIndex].days;
+  const todayStr = getLocalDateString(new Date());
 
   const fetchMetrics = useCallback(async (days: number) => {
     setLoading(true);
@@ -33,7 +34,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
     const computeLocalMetrics = (): DiagnosticMetrics => {
       const totalTrackedTasks = tasks.length;
       const completedTasks = tasks.filter(t => t.status === "completed").length;
-      const missedTasks = tasks.filter(t => t.status === "pending" && t.date < new Date().toISOString().split("T")[0]).length;
+      const missedTasks = tasks.filter(t => t.status === "pending" && t.date < todayStr).length;
       const completionRate = totalTrackedTasks > 0 ? Math.round((completedTasks / totalTrackedTasks) * 100) : 0;
 
       const flow = [];
@@ -76,34 +77,27 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
     } finally {
       setLoading(false);
     }
-  }, [tasks]);
+  }, [tasks, todayStr]);
 
   useEffect(() => {
     fetchMetrics(selectedDays);
   }, [selectedDays, fetchMetrics]);
 
-  const handlePeriodChange = (newIndex: number) => {
-    if (newIndex >= 0 && newIndex < PERIOD_OPTIONS.length) {
-      setPeriodIndex(newIndex);
-    }
-  };
-
   const displayRate = metrics?.completionRate ?? 0;
   const displayMissed = metrics?.missedTasks ?? 0;
-  const displayTotal = metrics?.totalTrackedTasks ?? 0;
-  const displayFocus = metrics?.focusBlocksCompleted ?? 0;
+  const displayTotal = metrics?.totalTrackedTasks ?? tasks.length;
+  const displayFocus = metrics?.focusBlocksCompleted ?? tasks.filter(t => t.status === "completed").length;
 
   const metricsDisplay = [
     { value: `${displayRate}%`, label: "Completion Rate", trend: "Period average", isPositive: displayRate >= 50 },
-    { value: `${displayMissed}`, label: "Missed Tasks", trend: "Past due pending", isPositive: displayMissed === 0 },
-    { value: `${displayTotal}`, label: "Total Tracked Tasks", trend: `Last ${selectedDays} days`, isPositive: true },
-    { value: `${displayFocus}`, label: "Focus Blocks Completed", trend: "Genuine completions", isPositive: displayFocus > 0 }
+    { value: `${displayMissed}`, label: "Overdue Tasks", trend: displayMissed === 0 ? "All caught up" : "Action needed", isPositive: displayMissed === 0 },
+    { value: `${displayTotal}`, label: "Total Tasks", trend: `Last ${selectedDays} days`, isPositive: true },
+    { value: `${displayFocus}`, label: "Completed Tasks", trend: "Total done", isPositive: displayFocus > 0 }
   ];
 
   const barChartData = (metrics?.chronologicalFlow ?? []).map((entry) => {
     const d = new Date(entry.date + "T00:00:00");
-    const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-    const todayStr = new Date().toISOString().split("T")[0];
+    const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
 
     return {
       day: dayName,
@@ -113,87 +107,81 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
     };
   });
 
-  const pendingTasks = tasks.filter(t => t.status === "pending").length;
-
-  const piggyInsights = [
-    {
-      subject: "Task Volume Analysis",
-      observation: `${profileName.split(" ")[0]}, you currently have ${pendingTasks} pending tasks in your system out of a total ${tasks.length}. Focus on clearing backlog before adding new modules.`
-    },
-    {
-      subject: "Habit Conformance",
-      observation: `Your maximum active streak across all habit structures is ${habits.length > 0 ? Math.max(...habits.map(h => h.streak)) : 0} days. Consistency is key to structural integrity.`
-    },
-    {
-      subject: "Action Item Focus",
-      observation: `You have ${displayMissed} deferred tasks lingering in past dates. Re-allocate them to today or decommission them to keep the workspace clean.`
-    }
-  ];
-
-  const currentPeriodLabel = PERIOD_OPTIONS[periodIndex].label;
+  // Calculate simple summary highlights
+  const completedTasksCount = tasks.filter(t => t.status === "completed").length;
+  const pendingTasksCount = tasks.filter(t => t.status === "pending").length;
+  const habitsDoneToday = habits.filter(h => safeLogs(h?.logs).includes(todayStr)).length;
+  const maxStreak = habits.length > 0 ? Math.max(...habits.map(h => h.streak || 0)) : 0;
 
   return (
-    <div className="space-y-6">
-      {/* Upper Period Selector */}
+    <div className="space-y-6 pb-24 max-w-6xl mx-auto">
+      {/* Header & Period Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="font-display font-black text-2xl text-slate-900 tracking-tight">Analytical Metrics</h2>
-          <p className="text-xs text-slate-500 font-sans mt-0.5">Statistical outputs derived from LifeOS modules.</p>
+          <h2 className="font-display font-bold text-2xl text-slate-900 dark:text-slate-100 tracking-tight">
+            Analytics & Trends
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">
+            Review your completion rates, habits, and productivity overview.
+          </p>
         </div>
 
-        {/* Period Scroll */}
-        <div className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-xl p-1 shadow-xs">
-          <button
-            onClick={() => handlePeriodChange(periodIndex - 1)}
-            disabled={periodIndex === 0}
-            className="p-1 px-1.5 hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-lg font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft className="w-4 h-4 text-slate-500" />
-          </button>
-          <span className="font-mono text-xs font-bold text-slate-700 px-3 tracking-wide">{currentPeriodLabel}</span>
-          <button
-            onClick={() => handlePeriodChange(periodIndex + 1)}
-            disabled={periodIndex === PERIOD_OPTIONS.length - 1}
-            className="p-1 px-1.5 hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-lg font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronRight className="w-4 h-4 text-slate-500" />
-          </button>
+        {/* Period Selector Tabs */}
+        <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-1 shadow-xs self-start sm:self-auto">
+          {PERIOD_OPTIONS.map((opt, idx) => (
+            <button
+              key={opt.label}
+              onClick={() => setPeriodIndex(idx)}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                periodIndex === idx
+                  ? "bg-amber-500 text-slate-950 shadow-xs"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Loading / Error States */}
+      {/* Loading & Error States */}
       {loading && (
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center py-16">
           <div className="flex items-center gap-3 text-slate-400">
-            <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-            <span className="font-mono text-xs tracking-wide">COMPILING DIAGNOSTIC DATA...</span>
+            <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+            <span className="font-sans text-xs">Loading analytics...</span>
           </div>
         </div>
       )}
 
       {error && !loading && (
-        <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
-          <p className="text-red-600 font-mono text-xs">{error}</p>
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-xl p-4 text-center">
+          <p className="text-red-600 dark:text-red-400 text-xs">{error}</p>
           <button
             onClick={() => fetchMetrics(selectedDays)}
-            className="mt-2 text-red-500 underline text-xs font-mono hover:text-red-700"
+            className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400 underline cursor-pointer"
           >
-            RETRY
+            Retry
           </button>
         </div>
       )}
 
       {!loading && !error && metrics && (
         <>
-          {/* 4-Column quick read status */}
+          {/* 4 Stat Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {metricsDisplay.map((m, idx) => (
-              <div key={idx} className="bg-white rounded-xl border border-slate-100 p-5 shadow-xs transition-transform hover:scale-[1.01]">
-                <span className="text-[10px] font-bold text-slate-400 font-mono tracking-widest block uppercase">{m.label}</span>
-                <span className="font-display font-extrabold text-2xl text-slate-800 block mt-1">{m.value}</span>
+              <div 
+                key={idx} 
+                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 p-5 shadow-xs transition-all"
+              >
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">{m.label}</span>
+                <span className="font-display font-bold text-2xl text-slate-900 dark:text-slate-100 block mt-1">{m.value}</span>
 
-                <span className={`flex items-center gap-1 text-[9px] font-mono font-bold mt-2 px-2.5 py-0.5 rounded-full w-max border ${
-                  m.isPositive ? 'text-emerald-600 bg-emerald-50/50 border-emerald-100' : 'text-amber-600 bg-amber-50/50 border-amber-100'
+                <span className={`inline-flex items-center gap-1 text-[11px] font-medium mt-2 px-2 py-0.5 rounded-full border ${
+                  m.isPositive 
+                    ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/60 dark:border-emerald-800/40' 
+                    : 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border-amber-200/60 dark:border-amber-800/40'
                 }`}>
                   {m.isPositive ? <TrendingUp className="w-3 h-3 shrink-0" /> : <TrendingDown className="w-3 h-3 shrink-0" />}
                   {m.trend}
@@ -202,79 +190,142 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
             ))}
           </div>
 
-          {/* Grid of Chart & J.A.R.V.I.S Prognosis */}
+          {/* Chart & Summary Breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-            {/* Weekly Completion Bar Chart representation */}
-            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-6 shadow-xs flex flex-col justify-between">
+            {/* Task Completion Bar Chart */}
+            <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 p-5 sm:p-6 shadow-xs flex flex-col justify-between">
               <div className="mb-4">
-                <h3 className="font-display font-bold text-slate-800 text-sm">Chronological Flow Metrics</h3>
-                <p className="text-xs text-slate-400 font-sans mt-0.5">Completions percentage over the last {selectedDays} days.</p>
+                <div className="flex items-center gap-2">
+                  <BarChart2 className="w-4.5 h-4.5 text-amber-500" />
+                  <h3 className="font-display font-bold text-slate-900 dark:text-slate-100 text-sm">
+                    Task Completion Rate
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 font-sans mt-0.5">
+                  Daily completion percentages over the last {selectedDays} days.
+                </p>
               </div>
 
-              <div className="h-64 w-full cursor-pointer">
+              <div className="h-64 w-full">
                 {barChartData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={barChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <XAxis
                         dataKey="day"
-                        tick={{ fill: '#94A3B8', fontSize: 10, fontFamily: 'JetBrains Mono', fontWeight: 'bold' }}
+                        tick={{ fill: '#94A3B8', fontSize: 11, fontFamily: 'Plus Jakarta Sans', fontWeight: 500 }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis
                         domain={[0, 100]}
-                        tick={{ fill: '#94A3B8', fontSize: 10, fontFamily: 'JetBrains Mono', fontWeight: 'bold' }}
+                        tick={{ fill: '#94A3B8', fontSize: 11, fontFamily: 'Plus Jakarta Sans', fontWeight: 500 }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <Tooltip
-                        cursor={{ fill: 'rgba(241, 245, 249, 0.5)' }}
-                        contentStyle={{ background: '#0F172A', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '11px', fontFamily: 'Plus Jakarta Sans' }}
+                        cursor={{ fill: 'rgba(241, 245, 249, 0.2)' }}
+                        contentStyle={{ 
+                          background: '#0F172A', 
+                          border: '1px solid #1E293B', 
+                          borderRadius: '12px', 
+                          color: '#fff', 
+                          fontSize: '12px', 
+                          fontFamily: 'Plus Jakarta Sans' 
+                        }}
+                        formatter={(val: any) => [`${val}%`, 'Completion']}
                       />
-                      <Bar dataKey="completion" radius={[8, 8, 0, 0]} maxBarSize={38}>
+                      <Bar dataKey="completion" radius={[6, 6, 0, 0]} maxBarSize={36}>
                         {barChartData.map((entry, index) => (
                           <Cell
                             key={`cell-${index}`}
-                            fill={entry.isToday ? "#F5A623" : "#E2E8F0"}
+                            fill={entry.isToday ? "#F59E0B" : "#cbd5e1"}
+                            className="dark:fill-slate-700 hover:opacity-80 transition-opacity"
                           />
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex items-center justify-center h-full text-slate-300 font-mono text-xs">
-                    NO DATA FOR THIS PERIOD
+                  <div className="flex items-center justify-center h-full text-slate-400 dark:text-slate-600 text-xs">
+                    No data recorded for this period
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Dark Piggy Custom Insights Panel */}
-            <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-lg border border-slate-800 p-6 flex flex-col justify-between">
+            {/* Simple Highlights & Summary Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 p-5 sm:p-6 shadow-xs flex flex-col justify-between space-y-5">
               <div className="space-y-4">
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                  <Brain className="w-5 h-5 text-amber-500 animate-pulse" />
-                  <h3 className="font-display font-bold text-white text-sm">Cognitive Synthesis Insights</h3>
+                <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <h3 className="font-display font-bold text-slate-900 dark:text-slate-100 text-sm">
+                    Summary Breakdown
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                    Current status across tasks and habits
+                  </p>
                 </div>
 
-                <div className="space-y-4 divide-y divide-slate-800/80">
-                  {piggyInsights.map((insight, idx) => (
-                    <div key={idx} className={`${idx > 0 ? 'pt-4' : ''}`}>
-                      <h4 className="font-mono text-[9px] font-bold text-amber-400 uppercase tracking-widest mb-1">
-                        {insight.subject}
-                      </h4>
-                      <p className="text-xs text-slate-300 font-sans leading-relaxed">
-                        {insight.observation}
-                      </p>
+                <div className="space-y-3">
+                  {/* Tasks breakdown */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">Completed Tasks</span>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">{pendingTasksCount} pending</span>
+                      </div>
                     </div>
-                  ))}
+                    <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">
+                      {completedTasksCount} / {tasks.length}
+                    </span>
+                  </div>
+
+                  {/* Habits streak */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                        <Flame className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">Habits Done Today</span>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">Longest streak: {maxStreak}d</span>
+                      </div>
+                    </div>
+                    <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">
+                      {habitsDoneToday} / {habits.length}
+                    </span>
+                  </div>
+
+                  {/* Overdue alert */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">Pending Overdue</span>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">Past target date</span>
+                      </div>
+                    </div>
+                    <span className={`font-mono font-bold text-sm ${displayMissed > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {displayMissed}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-6 pt-3 border-t border-slate-800/80 font-mono text-[8px] text-slate-500 uppercase tracking-wider flex justify-between">
-                <span>MODEL: LLAMA-3.1-8B-INSTANT</span>
-                <span>PROBABILITY PROG: OPTIMAL</span>
+              {/* Friendly Takeaway */}
+              <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-900 dark:text-amber-300">
+                {displayRate >= 70 ? (
+                  <p>🌟 <strong>Great momentum!</strong> You're consistently completing most of your scheduled tasks.</p>
+                ) : displayRate >= 40 ? (
+                  <p>⚡ <strong>Steady progress.</strong> Focus on checking off your highest priority missions today.</p>
+                ) : (
+                  <p>🌱 <strong>Fresh start.</strong> Pick 1 or 2 small tasks today to get momentum going.</p>
+                )}
               </div>
             </div>
 
@@ -284,4 +335,3 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ tasks, habits, pro
     </div>
   );
 };
-
